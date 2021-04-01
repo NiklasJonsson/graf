@@ -1,55 +1,23 @@
 use std::collections::VecDeque;
 
+mod map;
+mod set;
+
+pub use map::NodeMap;
+pub use set::NodeSet;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum GraphType {
     Directed,
     Undirected,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Node(usize);
-
-// TODO: Bitset
-pub struct NodeSet {
-    v: Vec<bool>,
-}
-
-impl NodeSet {
-    pub fn new() -> Self {
-        Self { v: Vec::new() }
-    }
-
-    pub fn add(&mut self, n: Node) {
-        let i = n.0;
-        if i >= self.v.len() {
-            self.v.resize(i + 1, false);
-        }
-        self.v[i] = true;
-    }
-
-    pub fn has(&self, n: Node) -> bool {
-        let i = n.0;
-        if i >= self.v.len() {
-            false
-        } else {
-            self.v[i]
-        }
-    }
-
-    pub fn remove(&mut self, n: Node) -> bool {
-        let i = n.0;
-        if i >= self.v.len() {
-            false
-        } else {
-            let r = self.v[i];
-            self.v[i] = false;
-            r
-        }
-    }
-}
+pub type Cost = f32;
 
 pub struct AdjacencyList {
-    nodes: Vec<Vec<Node>>,
+    nodes: Vec<Vec<(Node, Cost)>>,
     ty: GraphType,
 }
 
@@ -71,34 +39,48 @@ impl AdjacencyList {
         n.0 < self.nodes.len()
     }
 
-    pub fn add_edge(&mut self, a: Node, b: Node) {
+    pub fn add_edge(&mut self, a: Node, b: Node, c: Cost) {
         assert!(self.is_valid(a) && self.is_valid(b));
-        assert!(self.nodes[a.0].iter().find(|&&x| x == b).is_none());
-        self.nodes[a.0].push(b);
+        if self.has_directed_edge_unchecked(a, b) {
+            return;
+        }
+        self.nodes[a.0].push((b, c));
         if self.ty == GraphType::Undirected {
-            assert!(self.nodes[b.0].iter().find(|&&x| x == a).is_none());
-            self.nodes[b.0].push(a);
+            assert!(self.has_directed_edge_unchecked(b, a));
+            self.nodes[b.0].push((a, c));
         }
     }
 
+    fn has_directed_edge_unchecked(&self, a: Node, b: Node) -> bool {
+        return self.nodes[a.0].iter().find(|&&(x, _)| x == b).is_some();
+    }
+
     pub fn has_edge(&self, a: Node, b: Node) -> bool {
-        if self.nodes[a.0].iter().find(|&&x| x == b).is_some() {
+        if !self.is_valid(a) || !self.is_valid(b) {
+            return false;
+        }
+
+        if self.has_directed_edge_unchecked(a, b) {
             return true;
         }
 
         if self.ty == GraphType::Undirected {
-            return self.nodes[b.0].iter().find(|&&x| x == a).is_some();
+            return self.has_directed_edge_unchecked(b, a);
         }
 
         false
     }
 
-    pub fn edges(&self, n: Node) -> impl Iterator<Item = &Node> {
+    pub fn edges(&self, n: Node) -> impl Iterator<Item = &(Node, Cost)> {
         self.nodes[n.0].iter()
     }
 
     pub fn nodes(&self) -> impl Iterator<Item = Node> {
         (0..self.nodes.len()).map(Node)
+    }
+
+    pub fn size(&self) -> usize {
+        self.nodes.len()
     }
 }
 
@@ -123,8 +105,8 @@ pub fn dfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
             }
             visited.add(n);
             visit(n);
-            for child in g.edges(n) {
-                queue.push_back(*child);
+            for &(child, _) in g.edges(n) {
+                queue.push_back(child);
             }
         }
     }
@@ -136,7 +118,7 @@ pub fn bfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
     }
 
     let mut queue = VecDeque::new();
-    let mut visited = NodeSet::new();
+    let mut visited = NodeSet::with_capacity(g.size());
 
     for n in g.nodes() {
         if visited.has(n) {
@@ -151,15 +133,70 @@ pub fn bfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
             }
             visited.add(n);
             visit(n);
-            for child in g.edges(n) {
-                queue.push_back(*child);
+            for &(child, _) in g.edges(n) {
+                queue.push_back(child);
             }
         }
     }
 }
 
+pub type Path = Vec<(Node, Cost)>;
+
+pub fn pathfind(g: &AdjacencyList, start: Node, end: Node) -> Option<Path> {
+    if g.nodes.is_empty() || start == end {
+        return None;
+    }
+
+    let mut queue = VecDeque::new();
+    let mut visited = NodeSet::with_capacity(g.size());
+    let mut parents = NodeMap::with_capacity(g.size());
+    queue.push_back(start);
+    visited.add(start);
+
+    let mut found = false;
+    while let Some(n) = queue.pop_front() {
+        if found {
+            break;
+        }
+        for &(child, cost) in g.edges(n) {
+            if visited.has(child) {
+                continue;
+            }
+
+            parents.insert(child, (n, cost));
+            if child == end {
+                found = true;
+                break;
+            }
+
+            visited.add(child);
+            queue.push_back(child);
+        }
+    }
+
+    if !found {
+        return None;
+    }
+
+    let mut child = end;
+    let mut path = Path::new();
+    loop {
+        let (parent, cost) = *parents
+            .get(&child)
+            .expect(&format!("Expected {:?} to have a parent", child));
+        path.push((child, cost));
+        child = parent;
+        if child == start {
+            break;
+        }
+    }
+    path.push((start, 0.0));
+    path.reverse();
+    Some(path)
+}
+
 #[cfg(test)]
-mod tests {
+mod test {
     use crate::{AdjacencyList, GraphType, Node};
 
     #[test]
@@ -168,7 +205,7 @@ mod tests {
 
         let a = g.add_node();
         let b = g.add_node();
-        g.add_edge(a, b);
+        g.add_edge(a, b, 1.0);
         assert!(g.has_edge(a, b));
     }
 
@@ -181,7 +218,7 @@ mod tests {
 
         let nodes: Vec<Node> = (0..20).map(|_| g.add_node()).collect();
         for e in edges.iter() {
-            g.add_edge(nodes[e.0], nodes[e.1]);
+            g.add_edge(nodes[e.0], nodes[e.1], 1.0);
         }
 
         g
