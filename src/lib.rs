@@ -130,6 +130,34 @@ pub fn dfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
     }
 }
 
+pub fn bfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
+    if g.nodes.is_empty() {
+        return;
+    }
+
+    let mut queue = VecDeque::new();
+    let mut visited = NodeSet::new();
+
+    for n in g.nodes() {
+        if visited.has(n) {
+            continue;
+        }
+
+        queue.clear();
+        queue.push_back(n);
+        while let Some(n) = queue.pop_front() {
+            if visited.has(n) {
+                continue;
+            }
+            visited.add(n);
+            visit(n);
+            for child in g.edges(n) {
+                queue.push_back(*child);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{AdjacencyList, GraphType, Node};
@@ -178,6 +206,23 @@ mod tests {
 
         let expected: Vec<Node> = vec![
             0, 4, 1, 19, 2, 3, 6, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+        ]
+        .into_iter()
+        .map(Node)
+        .collect();
+        assert_eq!(visited, expected);
+    }
+
+    #[test]
+    fn bfs() {
+        let edges = example_edges();
+        let g = init(&edges);
+        let mut visited = Vec::new();
+        let visit = |n: Node| visited.push(n);
+        crate::bfs(&g, visit);
+
+        let expected: Vec<Node> = vec![
+            0, 19, 4, 1, 2, 3, 6, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
         ]
         .into_iter()
         .map(Node)
