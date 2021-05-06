@@ -1,4 +1,7 @@
+#![feature(trait_alias)]
+
 use std::collections::VecDeque;
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 mod map;
 mod set;
@@ -12,12 +15,41 @@ pub enum GraphType {
     Undirected,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Node(usize);
 pub type Cost = f32;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Edge {
+    pub node: Node,
+    pub cost: Cost,
+}
+impl Eq for Edge {}
+impl Ord for Edge {
+    fn cmp(&self, o: &Self) -> Ordering {
+        o.cost
+            .partial_cmp(&self.cost)
+            .expect("Invalid float")
+            .then_with(|| self.node.cmp(&o.node))
+    }
+}
+impl PartialOrd for Edge {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn edge(n: Node, c: Cost) -> Edge {
+    Edge { node: n, cost: c }
+}
+
+impl From<(Node, Cost)> for Edge {
+    fn from((node, cost): (Node, Cost)) -> Self {
+        Edge { node, cost }
+    }
+}
 pub struct AdjacencyList {
-    nodes: Vec<Vec<(Node, Cost)>>,
+    nodes: Vec<Vec<Edge>>,
     ty: GraphType,
 }
 
@@ -44,15 +76,18 @@ impl AdjacencyList {
         if self.has_directed_edge_unchecked(a, b) {
             return;
         }
-        self.nodes[a.0].push((b, c));
+        self.nodes[a.0].push(edge(b, c));
         if self.ty == GraphType::Undirected {
             assert!(self.has_directed_edge_unchecked(b, a));
-            self.nodes[b.0].push((a, c));
+            self.nodes[b.0].push(edge(a, c));
         }
     }
 
     fn has_directed_edge_unchecked(&self, a: Node, b: Node) -> bool {
-        return self.nodes[a.0].iter().find(|&&(x, _)| x == b).is_some();
+        return self.nodes[a.0]
+            .iter()
+            .find(|&&edge| edge.node == b)
+            .is_some();
     }
 
     pub fn has_edge(&self, a: Node, b: Node) -> bool {
@@ -71,7 +106,7 @@ impl AdjacencyList {
         false
     }
 
-    pub fn edges(&self, n: Node) -> impl Iterator<Item = &(Node, Cost)> {
+    pub fn edges(&self, n: Node) -> impl Iterator<Item = &Edge> {
         self.nodes[n.0].iter()
     }
 
@@ -105,7 +140,7 @@ pub fn dfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
             }
             visited.add(n);
             visit(n);
-            for &(child, _) in g.edges(n) {
+            for &Edge { node: child, .. } in g.edges(n) {
                 queue.push_back(child);
             }
         }
@@ -133,16 +168,32 @@ pub fn bfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
             }
             visited.add(n);
             visit(n);
-            for &(child, _) in g.edges(n) {
+            for &Edge { node: child, .. } in g.edges(n) {
                 queue.push_back(child);
             }
         }
     }
 }
 
-pub type Path = Vec<(Node, Cost)>;
+pub type Path = Vec<Edge>;
 
-pub fn pathfind(g: &AdjacencyList, start: Node, end: Node) -> Option<Path> {
+fn reconstruct(start: &Node, end: &Node, parents: &NodeMap<Edge>) -> Option<Path> {
+    let mut child = *end;
+    let mut path = Path::new();
+    loop {
+        let Edge { node: parent, cost } = *parents.get(&child)?;
+        path.push(edge(child, cost));
+        child = parent;
+        if child == *start {
+            path.push(edge(*start, 0.0));
+            path.reverse();
+            return Some(path);
+        }
+    }
+}
+
+/// Find a path between two nodes
+pub fn path(g: &AdjacencyList, start: Node, end: Node) -> Option<Path> {
     if g.nodes.is_empty() || start == end {
         return None;
     }
@@ -153,20 +204,15 @@ pub fn pathfind(g: &AdjacencyList, start: Node, end: Node) -> Option<Path> {
     queue.push_back(start);
     visited.add(start);
 
-    let mut found = false;
     while let Some(n) = queue.pop_front() {
-        if found {
-            break;
-        }
-        for &(child, cost) in g.edges(n) {
+        for &Edge { node: child, cost } in g.edges(n) {
             if visited.has(child) {
                 continue;
             }
 
-            parents.insert(child, (n, cost));
+            parents.insert(child, edge(n, cost));
             if child == end {
-                found = true;
-                break;
+                return reconstruct(&start, &end, &parents);
             }
 
             visited.add(child);
@@ -174,25 +220,56 @@ pub fn pathfind(g: &AdjacencyList, start: Node, end: Node) -> Option<Path> {
         }
     }
 
-    if !found {
+    None
+}
+
+pub trait HeuristicDistanceFn = Fn(&Node) -> Cost;
+
+pub fn shortest_path(
+    g: &AdjacencyList,
+    start: Node,
+    end: Node,
+    heuristic: impl HeuristicDistanceFn,
+) -> Option<Path> {
+    a_star(g, start, end, heuristic)
+}
+/// Find the shortest path between two nodes
+pub fn a_star(
+    g: &AdjacencyList,
+    start: Node,
+    end: Node,
+    heuristic: impl HeuristicDistanceFn,
+) -> Option<Path> {
+    if g.nodes.is_empty() || start == end {
         return None;
     }
 
-    let mut child = end;
-    let mut path = Path::new();
-    loop {
-        let (parent, cost) = *parents
-            .get(&child)
-            .expect(&format!("Expected {:?} to have a parent", child));
-        path.push((child, cost));
-        child = parent;
-        if child == start {
-            break;
+    let mut node_cost: NodeMap<Cost> = NodeMap::with_capacity(g.size());
+    let mut parents: NodeMap<Edge> = NodeMap::with_capacity(g.size());
+    let mut queue: BinaryHeap<Edge> = std::collections::BinaryHeap::new();
+    node_cost.insert(start, 0.0);
+    queue.push(edge(start, 0.0));
+
+    while let Some(Edge { node: cur, .. }) = queue.pop() {
+        if cur == end {
+            return reconstruct(&start, &end, &parents);
+        }
+
+        for &Edge { node: child, cost } in g.edges(cur) {
+            let start_to_child_cost = node_cost[cur] + cost;
+            if !node_cost.has(&child) || start_to_child_cost < node_cost[child] {
+                node_cost.insert(child, start_to_child_cost);
+                parents.insert(child, edge(cur, cost));
+
+                if queue.iter().find(|e| e.node == child).is_none() {
+                    let estimated_end_cost = start_to_child_cost + heuristic(&child);
+                    queue.push(edge(child, estimated_end_cost));
+                }
+            }
         }
     }
-    path.push((start, 0.0));
-    path.reverse();
-    Some(path)
+
+    None
 }
 
 #[cfg(test)]

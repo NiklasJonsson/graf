@@ -5,9 +5,10 @@ use movingai::{
 use movingai::{Coords2D, Map2D as _};
 use structopt::StructOpt;
 
-use graf::{AdjacencyList, Cost, Node, NodeMap};
+use indicatif::ProgressIterator;
 
-use std::collections::hash_map::Entry;
+use graf::{AdjacencyList, Cost, Edge, Node, NodeMap};
+
 use std::{collections::HashMap, io::Write};
 
 use std::path::{Path, PathBuf};
@@ -35,7 +36,7 @@ fn dump_map_format(
     let mut data = Vec::with_capacity(width * height);
     data.resize(width * height, false);
     for n in graph.nodes() {
-        for (n2, _) in graph.edges(n) {
+        for n2 in graph.edges(n).map(|x| x.node) {
             let (x, y) = node2coord[n2];
             data[x + width * y] = true;
         }
@@ -61,12 +62,12 @@ fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, fpath: &Pat
     for node in graph.nodes() {
         write!(file, "{:?} ({:?}):", node, node2coord[&node]).unwrap();
         let mut first = true;
-        for (c, _) in graph.edges(node) {
+        for child in graph.edges(node).map(|x| x.node) {
             if !first {
                 write!(file, ", ").unwrap();
             }
             first = false;
-            write!(file, "{:?} ({:?})", c, node2coord[c]).unwrap();
+            write!(file, "{:?} ({:?})", child, node2coord[child]).unwrap();
         }
         writeln!(file, "").unwrap();
     }
@@ -74,7 +75,7 @@ fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, fpath: &Pat
 
 fn dump_path(gpath: &graf::Path, node2coord: &NodeMap<Coords2D>) {
     let mut total = 0.0;
-    for (node, cost) in gpath {
+    for Edge { node, cost } in gpath {
         let c = node2coord[node];
         total += cost;
         println!("({:?}, {})", c, cost);
@@ -112,28 +113,22 @@ fn run(args: Args) {
     let mut path = std::path::PathBuf::from("data/dao-map");
     path.push(map);
     let raw_map = parse_map_file(&path).unwrap();
+    let size = raw_map.width() * raw_map.height();
     let mut graph = AdjacencyList::new(graf::GraphType::Directed);
-    let mut coord2node = HashMap::<Coords2D, Node>::new();
-    let mut node2coord = NodeMap::<Coords2D>::new();
-
-    let mut get_or_insert = |g: &mut AdjacencyList, c: Coords2D| -> Node {
-        let n = match coord2node.entry(c) {
-            Entry::Vacant(entry) => {
-                let n = g.add_node();
-                node2coord.insert(n, c);
-                *entry.insert(n)
-            }
-            Entry::Occupied(entry) => *entry.get(),
-        };
-
-        n
-    };
+    let mut coord2node = HashMap::<Coords2D, Node>::with_capacity(size);
+    let mut node2coord = NodeMap::<Coords2D>::with_capacity(size);
+    for y in 0..raw_map.height() {
+        for x in 0..raw_map.width() {
+            let n = graph.add_node();
+            coord2node.insert((x, y), n);
+            node2coord.insert(n, (x, y));
+        }
+    }
 
     for coord in raw_map.coords() {
-        let n = get_or_insert(&mut graph, coord);
-
+        let n = coord2node[&coord];
         for (neighbour, cost) in neighbors(&raw_map, coord) {
-            let n2 = get_or_insert(&mut graph, neighbour);
+            let n2 = coord2node[&neighbour];
             graph.add_edge(n, n2, cost);
         }
     }
@@ -146,21 +141,30 @@ fn run(args: Args) {
         dump_graph(&graph, &node2coord, &o);
     }
 
-    for scenario in &scenarios {
+    for scenario in scenarios.iter() {
         let start = *coord2node
             .get(&scenario.start_pos)
             .expect("This should have a node assigned");
         let end = *coord2node
             .get(&scenario.goal_pos)
             .expect("This should have a node assigned");
-        println!("{:?} ({:?}):", start, node2coord[&start]);
-        println!("{:?} ({:?}):", end, node2coord[&end]);
-        let path = graf::pathfind(&graph, start, end).expect("Failed to find path");
-        dump_path(&path, &node2coord);
-        assert_eq!(
-            scenario.optimal_length as f32,
-            path.iter().fold(0.0, |acc, e| acc + e.1)
-        );
+
+        let heuristic = |n: &Node| -> Cost {
+            let (n_x, n_y) = node2coord
+                .get(n)
+                .expect("Unrecognized node, no matching coords");
+            let x = scenario.goal_pos.0 as Cost - *n_x as Cost;
+            let y = scenario.goal_pos.1 as Cost - *n_y as Cost;
+            (x.powi(2) + y.powi(2)).sqrt()
+        };
+
+        let path = graf::shortest_path(&graph, start, end, heuristic).expect("Failed to find path");
+        let cost = path.iter().fold(0.0, |acc, Edge { node: _, cost }| acc + cost) as f64;
+        let diff = (scenario.optimal_length - cost).abs();
+        if diff > 0.0001 {
+            println!("shortest path mismatch: {}", diff);
+            println!("start: {:?}, end: {:?}", scenario.start_pos, scenario.goal_pos);
+        }
     }
 }
 
