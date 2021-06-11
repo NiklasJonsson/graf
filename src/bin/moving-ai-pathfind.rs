@@ -159,11 +159,16 @@ fn run(args: Args) {
         };
 
         let path = graf::shortest_path(&graph, start, end, heuristic).expect("Failed to find path");
-        let cost = path.iter().fold(0.0, |acc, Edge { node: _, cost }| acc + cost) as f64;
+        let cost = path
+            .iter()
+            .fold(0.0, |acc, Edge { node: _, cost }| acc + cost) as f64;
         let diff = (scenario.optimal_length - cost).abs();
         if diff > 0.0001 {
             println!("shortest path mismatch: {}", diff);
-            println!("start: {:?}, end: {:?}", scenario.start_pos, scenario.goal_pos);
+            println!(
+                "start: {:?}, end: {:?}",
+                scenario.start_pos, scenario.goal_pos
+            );
         }
     }
 }

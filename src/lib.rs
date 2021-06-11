@@ -48,6 +48,7 @@ impl From<(Node, Cost)> for Edge {
         Edge { node, cost }
     }
 }
+
 pub struct AdjacencyList {
     nodes: Vec<Vec<Edge>>,
     ty: GraphType,
