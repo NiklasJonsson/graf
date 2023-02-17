@@ -1,89 +1,93 @@
+use graf::{AdjacencyList, Cost, Edge, Node, NodeMap};
+
+use clap::Parser;
 use movingai::{
     parser::{parse_map_file, parse_scen_file},
     MovingAiMap,
 };
 use movingai::{Coords2D, Map2D as _};
-use structopt::StructOpt;
-
-use indicatif::ProgressIterator;
-
-use graf::{AdjacencyList, Cost, Edge, Node, NodeMap};
-
-use std::{collections::HashMap, io::Write};
 
 use std::path::{Path, PathBuf};
+use std::{collections::HashMap, io::Write};
 
-#[derive(Debug, StructOpt)]
-struct Args {
-    #[structopt(parse(from_os_str))]
-    input: PathBuf,
-    #[structopt(long, parse(from_os_str))]
+#[derive(Debug, Parser)]
+#[command(author, version)]
+struct Cli {
+    /// The path to a .scen file from moving AI, or a directory of .scen files
+    scenario: PathBuf,
+    /// Maps directory
+    maps_dir: PathBuf,
+    #[arg(long)]
     output_graph: Option<PathBuf>,
-    #[structopt(long, parse(from_os_str))]
+    #[arg(long)]
     output_map: Option<PathBuf>,
 }
 
-fn dump_map_format(
-    graph: &AdjacencyList,
-    node2coord: &NodeMap<Coords2D>,
-    width: usize,
-    height: usize,
-    path: &Path,
-) {
-    use std::fs::File;
+#[allow(dead_code)]
+mod dbg {
+    use super::*;
 
-    let mut file = File::create(&path).expect(&format!("Bad path: {}", path.display()));
-    let mut data = Vec::with_capacity(width * height);
-    data.resize(width * height, false);
-    for n in graph.nodes() {
-        for n2 in graph.edges(n).map(|x| x.node) {
-            let (x, y) = node2coord[n2];
-            data[x + width * y] = true;
-        }
-    }
+    pub fn dump_map_format(
+        graph: &AdjacencyList,
+        node2coord: &NodeMap<Coords2D>,
+        width: usize,
+        height: usize,
+        path: &Path,
+    ) {
+        use std::fs::File;
 
-    for i in 0..height {
-        let start = i * width;
-        let end = (i + 1) * width;
-        for &reachable in &data[start..end] {
-            if reachable {
-                write!(file, ".").unwrap();
-            } else {
-                write!(file, "T").unwrap();
+        let mut file = File::create(&path).expect(&format!("Bad path: {}", path.display()));
+        let mut data = Vec::with_capacity(width * height);
+        data.resize(width * height, false);
+        for n in graph.nodes() {
+            for n2 in graph.edges(n).map(|x| x.node) {
+                let (x, y) = node2coord[n2];
+                data[x + width * y] = true;
             }
         }
-        writeln!(file, "").unwrap();
-    }
-}
 
-fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, fpath: &Path) {
-    use std::fs::File;
-    let mut file = File::create(&fpath).expect(&format!("Bad path: {}", fpath.display()));
-    for node in graph.nodes() {
-        write!(file, "{:?} ({:?}):", node, node2coord[&node]).unwrap();
-        let mut first = true;
-        for child in graph.edges(node).map(|x| x.node) {
-            if !first {
-                write!(file, ", ").unwrap();
+        for i in 0..height {
+            let start = i * width;
+            let end = (i + 1) * width;
+            for &reachable in &data[start..end] {
+                if reachable {
+                    write!(file, ".").unwrap();
+                } else {
+                    write!(file, "T").unwrap();
+                }
             }
-            first = false;
-            write!(file, "{:?} ({:?})", child, node2coord[child]).unwrap();
+            writeln!(file, "").unwrap();
         }
-        writeln!(file, "").unwrap();
-    }
-}
-
-fn dump_path(gpath: &graf::Path, node2coord: &NodeMap<Coords2D>) {
-    let mut total = 0.0;
-    for Edge { node, cost } in gpath {
-        let c = node2coord[node];
-        total += cost;
-        println!("({:?}, {})", c, cost);
     }
 
-    println!("total: {}", total);
-}
+    pub fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, fpath: &Path) {
+        use std::fs::File;
+        let mut file = File::create(&fpath).expect(&format!("Bad path: {}", fpath.display()));
+        for node in graph.nodes() {
+            write!(file, "{:?} ({:?}):", node, node2coord[&node]).unwrap();
+            let mut first = true;
+            for child in graph.edges(node).map(|x| x.node) {
+                if !first {
+                    write!(file, ", ").unwrap();
+                }
+                first = false;
+                write!(file, "{:?} ({:?})", child, node2coord[child]).unwrap();
+            }
+            writeln!(file, "").unwrap();
+        }
+    }
 
+    pub fn dump_path(gpath: &graf::Path, node2coord: &NodeMap<Coords2D>) {
+        let mut total = 0.0;
+        for Edge { node, cost } in gpath {
+            let c = node2coord[node];
+            total += cost;
+            println!("({:?}, {})", c, cost);
+        }
+
+        println!("total: {}", total);
+    }
+}
 const DIAG_COST: Cost = std::f32::consts::SQRT_2;
 const STRAIGHT_COST: Cost = 1.0;
 fn neighbors(map: &MovingAiMap, tile: Coords2D) -> Vec<(Coords2D, Cost)> {
@@ -107,16 +111,65 @@ fn neighbors(map: &MovingAiMap, tile: Coords2D) -> Vec<(Coords2D, Cost)> {
         .collect()
 }
 
-fn run(args: Args) {
-    let scenarios = parse_scen_file(&args.input).unwrap();
-    let map = scenarios[0].map_file.clone();
-    let mut path = std::path::PathBuf::from("data/dao-map");
-    path.push(map);
+fn run_single_scenario(
+    scenario: &movingai::SceneRecord,
+    graph: &AdjacencyList,
+    coord2node: &HashMap<Coords2D, Node>,
+    node2coord: &NodeMap<Coords2D>,
+) {
+    let start = *coord2node
+        .get(&scenario.start_pos)
+        .expect("This should have a node assigned");
+    let end = *coord2node
+        .get(&scenario.goal_pos)
+        .expect("This should have a node assigned");
+
+    let heuristic = |n: &Node| -> Cost {
+        let (n_x, n_y) = node2coord
+            .get(n)
+            .expect("Unrecognized node, no matching coords");
+        let x = scenario.goal_pos.0 as Cost - *n_x as Cost;
+        let y = scenario.goal_pos.1 as Cost - *n_y as Cost;
+        (x.powi(2) + y.powi(2)).sqrt()
+    };
+
+    let path = graf::shortest_path(&graph, start, end, heuristic).expect("Failed to find path");
+    let cost = path
+        .iter()
+        .fold(0.0, |acc, Edge { node: _, cost }| acc + cost) as f64;
+    let expected = scenario.optimal_length;
+    let diff = (expected - cost).abs();
+    if diff > 0.001 {
+        println!("shortest path mismatch: {}", diff);
+        println!(
+            "start: {:?}, end: {:?}",
+            scenario.start_pos, scenario.goal_pos
+        );
+    }
+}
+
+fn run_for_scenario_file(
+    scenario: &Path,
+    maps: &Path,
+    output_map: &Option<PathBuf>,
+    output_graph: &Option<PathBuf>,
+) {
+    let scenarios = parse_scen_file(scenario).unwrap();
+    let first_map = scenarios[0].map_file.clone();
+    let same = scenarios.iter().all(|s| s.map_file == first_map);
+    assert!(
+        same,
+        "All maps are not the same as {first_map} in {scenario}",
+        scenario = scenario.display()
+    );
+    let mut path = std::path::PathBuf::from(maps);
+    path.push(first_map);
     let raw_map = parse_map_file(&path).unwrap();
     let size = raw_map.width() * raw_map.height();
     let mut graph = AdjacencyList::new(graf::GraphType::Directed);
     let mut coord2node = HashMap::<Coords2D, Node>::with_capacity(size);
     let mut node2coord = NodeMap::<Coords2D>::with_capacity(size);
+
     for y in 0..raw_map.height() {
         for x in 0..raw_map.width() {
             let n = graph.add_node();
@@ -133,47 +186,41 @@ fn run(args: Args) {
         }
     }
 
-    if let Some(o) = args.output_map {
-        dump_map_format(&graph, &node2coord, raw_map.width(), raw_map.height(), &o);
+    if let Some(o) = output_map {
+        dbg::dump_map_format(&graph, &node2coord, raw_map.width(), raw_map.height(), &o);
     }
 
-    if let Some(o) = args.output_graph {
-        dump_graph(&graph, &node2coord, &o);
+    if let Some(o) = output_graph {
+        dbg::dump_graph(&graph, &node2coord, &o);
     }
 
     for scenario in scenarios.iter() {
-        let start = *coord2node
-            .get(&scenario.start_pos)
-            .expect("This should have a node assigned");
-        let end = *coord2node
-            .get(&scenario.goal_pos)
-            .expect("This should have a node assigned");
+        run_single_scenario(scenario, &graph, &coord2node, &node2coord);
+    }
+}
 
-        let heuristic = |n: &Node| -> Cost {
-            let (n_x, n_y) = node2coord
-                .get(n)
-                .expect("Unrecognized node, no matching coords");
-            let x = scenario.goal_pos.0 as Cost - *n_x as Cost;
-            let y = scenario.goal_pos.1 as Cost - *n_y as Cost;
-            (x.powi(2) + y.powi(2)).sqrt()
-        };
-
-        let path = graf::shortest_path(&graph, start, end, heuristic).expect("Failed to find path");
-        let cost = path
-            .iter()
-            .fold(0.0, |acc, Edge { node: _, cost }| acc + cost) as f64;
-        let diff = (scenario.optimal_length - cost).abs();
-        if diff > 0.0001 {
-            println!("shortest path mismatch: {}", diff);
-            println!(
-                "start: {:?}, end: {:?}",
-                scenario.start_pos, scenario.goal_pos
-            );
+fn run(cli: Cli) {
+    let path = &cli.scenario;
+    if path.is_dir() {
+        let itr = std::fs::read_dir(path).expect("Failed to read directory contents");
+        for path in itr {
+            let path = path.expect("Failed to read path");
+            if path.file_name().to_str().unwrap().ends_with(".scen") {
+                println!("Running for scene {p}", p = path.path().display());
+                run_for_scenario_file(
+                    &path.path(),
+                    &cli.maps_dir,
+                    &cli.output_map,
+                    &cli.output_graph,
+                );
+            }
         }
+    } else {
+        run_for_scenario_file(path, &cli.maps_dir, &cli.output_map, &cli.output_graph);
     }
 }
 
 fn main() {
-    let args = Args::from_args();
-    run(args)
+    let cli = Cli::parse();
+    run(cli)
 }
