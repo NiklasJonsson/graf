@@ -42,6 +42,27 @@ impl NodeSet {
             r
         }
     }
+
+    pub fn to_vec(self) -> Vec<Node> {
+        self.v
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, x)| if x { Some(Node(i)) } else { None })
+            .collect::<Vec<Node>>()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        for &v in self.v.iter() {
+            if v {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn size(&self) -> usize {
+        self.v.iter().filter(|&&x| x).count()
+    }
 }
 
 #[cfg(test)]

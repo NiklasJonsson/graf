@@ -3,13 +3,15 @@
 use std::collections::VecDeque;
 use std::{cmp::Ordering, collections::BinaryHeap};
 
+mod fmt;
 mod map;
 mod set;
 
 pub use map::NodeMap;
 pub use set::NodeSet;
 
-#[derive(Debug, PartialEq, Eq)]
+// TODO: Remove
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum GraphType {
     Directed,
     Undirected,
@@ -17,6 +19,13 @@ pub enum GraphType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Node(usize);
+
+impl std::fmt::Display for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
+    }
+}
+
 pub type Cost = f32;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,6 +58,7 @@ impl From<(Node, Cost)> for Edge {
     }
 }
 
+#[derive(Clone)]
 pub struct AdjacencyList {
     nodes: Vec<Vec<Edge>>,
     ty: GraphType,
@@ -85,10 +95,7 @@ impl AdjacencyList {
     }
 
     fn has_directed_edge_unchecked(&self, a: Node, b: Node) -> bool {
-        return self.nodes[a.0]
-            .iter()
-            .find(|&&edge| edge.node == b)
-            .is_some();
+        return self.nodes[a.0].iter().any(|edge| edge.node == b);
     }
 
     pub fn has_edge(&self, a: Node, b: Node) -> bool {
@@ -107,8 +114,22 @@ impl AdjacencyList {
         false
     }
 
+    /// Return the outgoing edges from n
     pub fn edges(&self, n: Node) -> impl Iterator<Item = &Edge> {
+        assert!(self.is_valid(n));
         self.nodes[n.0].iter()
+    }
+
+    pub fn remove_edge(&mut self, a: Node, b: Node) -> Option<Edge> {
+        assert!(self.is_valid(a));
+        let edges = &mut self.nodes[a.0];
+        let pos = edges.iter().position(|e| e.node == b)?;
+        Some(edges.swap_remove(pos))
+    }
+
+    pub fn clear_edges(&mut self, n: Node) -> Vec<Edge> {
+        assert!(self.is_valid(n));
+        std::mem::take(&mut self.nodes[n.0])
     }
 
     pub fn nodes(&self) -> impl Iterator<Item = Node> {
@@ -117,6 +138,56 @@ impl AdjacencyList {
 
     pub fn size(&self) -> usize {
         self.nodes.len()
+    }
+
+    pub fn inverted(&self) -> Self {
+        let mut out = Self::new(self.ty);
+        out.nodes.reserve(self.nodes.len());
+        for _ in self.nodes() {
+            out.add_node();
+        }
+        for n in self.nodes() {
+            for e in self.edges(n) {
+                out.add_edge(e.node, n, 1.0);
+            }
+        }
+        out
+    }
+}
+
+pub fn compute_roots(g: &AdjacencyList) -> Vec<Node> {
+    let mut roots: NodeSet = NodeSet::with_capacity(g.size());
+    for n in g.nodes() {
+        roots.add(n);
+    }
+
+    for n in g.nodes() {
+        for e in g.edges(n) {
+            roots.remove(e.node);
+        }
+    }
+
+    roots.to_vec()
+}
+
+fn dfs_at_impl(
+    g: &AdjacencyList,
+    n: Node,
+    mut visit: impl FnMut(Node),
+    queue: &mut VecDeque<Node>,
+    visited: &mut NodeSet,
+) {
+    queue.clear();
+    queue.push_back(n);
+    while let Some(n) = queue.pop_back() {
+        if visited.has(n) {
+            continue;
+        }
+        visited.add(n);
+        visit(n);
+        for &Edge { node: child, .. } in g.edges(n) {
+            queue.push_back(child);
+        }
     }
 }
 
@@ -133,18 +204,7 @@ pub fn dfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
             continue;
         }
 
-        queue.clear();
-        queue.push_back(n);
-        while let Some(n) = queue.pop_back() {
-            if visited.has(n) {
-                continue;
-            }
-            visited.add(n);
-            visit(n);
-            for &Edge { node: child, .. } in g.edges(n) {
-                queue.push_back(child);
-            }
-        }
+        dfs_at_impl(g, n, &mut visit, &mut queue, &mut visited);
     }
 }
 
@@ -161,7 +221,6 @@ pub fn bfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
             continue;
         }
 
-        queue.clear();
         queue.push_back(n);
         while let Some(n) = queue.pop_front() {
             if visited.has(n) {
@@ -191,37 +250,6 @@ fn reconstruct(start: &Node, end: &Node, parents: &NodeMap<Edge>) -> Option<Path
             return Some(path);
         }
     }
-}
-
-/// Find a path between two nodes
-pub fn path(g: &AdjacencyList, start: Node, end: Node) -> Option<Path> {
-    if g.nodes.is_empty() || start == end {
-        return None;
-    }
-
-    let mut queue = VecDeque::new();
-    let mut visited = NodeSet::with_capacity(g.size());
-    let mut parents = NodeMap::with_capacity(g.size());
-    queue.push_back(start);
-    visited.add(start);
-
-    while let Some(n) = queue.pop_front() {
-        for &Edge { node: child, cost } in g.edges(n) {
-            if visited.has(child) {
-                continue;
-            }
-
-            parents.insert(child, edge(n, cost));
-            if child == end {
-                return reconstruct(&start, &end, &parents);
-            }
-
-            visited.add(child);
-            queue.push_back(child);
-        }
-    }
-
-    None
 }
 
 pub trait HeuristicDistanceFn = Fn(&Node) -> Cost;
@@ -262,7 +290,7 @@ pub fn a_star(
                 node_cost.insert(child, start_to_child_cost);
                 parents.insert(child, edge(cur, cost));
 
-                if queue.iter().find(|e| e.node == child).is_none() {
+                if !queue.iter().any(|e| e.node == child) {
                     let estimated_end_cost = start_to_child_cost + heuristic(&child);
                     queue.push(edge(child, estimated_end_cost));
                 }
@@ -273,9 +301,117 @@ pub fn a_star(
     None
 }
 
+pub fn topsort(g: &AdjacencyList) -> Vec<Node> {
+    let mut out = vec![];
+
+    let mut roots = compute_roots(g);
+
+    let mut outgoing = g.clone();
+    let mut incoming: AdjacencyList = g.inverted();
+
+    while let Some(n) = roots.pop() {
+        out.push(n);
+
+        for e in outgoing.clear_edges(n) {
+            incoming
+                .remove_edge(e.node, n)
+                .expect("Missing edge, inverted graph is incorrect");
+
+            if incoming.edges(e.node).count() == 0 {
+                roots.push(e.node);
+            }
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod test {
     use crate::{AdjacencyList, GraphType, Node};
+
+    fn example_graph_trivial() -> AdjacencyList {
+        let mut g = AdjacencyList::new(GraphType::Directed);
+        let ns: [Node; 3] = std::array::from_fn(|_| g.add_node());
+
+        g.add_edge(ns[0], ns[1], 1.0);
+        g.add_edge(ns[0], ns[2], 1.0);
+
+        g
+    }
+
+    fn example_edges_cyclic() -> Vec<(usize, usize)> {
+        vec![(1, 4), (3, 6), (4, 1), (10, 19), (0, 19), (0, 4)]
+    }
+
+    fn example_edges_dag() -> Vec<(usize, usize)> {
+        vec![
+            (0, 1),
+            (1, 2),
+            (1, 3),
+            (1, 4),
+            (7, 10),
+            (10, 11),
+            (11, 12),
+            (12, 13),
+            (8, 9),
+            (14, 9),
+            (9, 16),
+            (9, 17),
+        ]
+    }
+
+    fn init(edges: &[(usize, usize)]) -> AdjacencyList {
+        let mut g = AdjacencyList::new(GraphType::Directed);
+
+        let max = edges
+            .iter()
+            .max_by(|x, y| x.0.max(x.1).cmp(&y.0.max(y.1)))
+            .unwrap();
+        let max = std::cmp::max(max.0, max.1);
+        let nodes: Vec<Node> = (0..max + 1).map(|_| g.add_node()).collect();
+        for e in edges.iter() {
+            g.add_edge(nodes[e.0], nodes[e.1], 1.0);
+        }
+
+        g
+    }
+
+    fn graph_from(edges_fn: fn() -> Vec<(usize, usize)>) -> AdjacencyList {
+        let e = edges_fn();
+        init(&e)
+    }
+
+    fn check_ordering(
+        name: &'static str,
+        origin: &AdjacencyList,
+        actual: &[Node],
+        expected: &[usize],
+    ) {
+        fn fmt(nodes: &[Node]) -> String {
+            let mut s = String::new();
+            for n in nodes {
+                s.push_str(&format!("{},", n.0));
+            }
+            if !s.is_empty() {
+                s.truncate(s.len() - 1);
+            }
+            return s;
+        }
+
+        let expected_nodes: Vec<Node> = expected.iter().copied().map(Node).collect();
+        if actual != expected_nodes {
+            println!("Node order diff!");
+            println!("Expected:");
+            println!("{}", fmt(&expected_nodes));
+            println!("Actual:");
+            println!("{}", fmt(actual));
+            let filename = format!("{name}.dot");
+            println!("Writing {filename}");
+            std::fs::write(filename, crate::fmt::to_dot(&origin)).unwrap();
+            assert!(false);
+        }
+    }
 
     #[test]
     fn add_simple() {
@@ -287,24 +423,9 @@ mod test {
         assert!(g.has_edge(a, b));
     }
 
-    fn example_edges() -> [(usize, usize); 6] {
-        [(1, 4), (3, 6), (4, 1), (10, 19), (0, 19), (0, 4)]
-    }
-
-    fn init(edges: &[(usize, usize)]) -> AdjacencyList {
-        let mut g = AdjacencyList::new(GraphType::Directed);
-
-        let nodes: Vec<Node> = (0..20).map(|_| g.add_node()).collect();
-        for e in edges.iter() {
-            g.add_edge(nodes[e.0], nodes[e.1], 1.0);
-        }
-
-        g
-    }
-
     #[test]
     fn add() {
-        let edges = example_edges();
+        let edges = example_edges_cyclic();
         let g = init(&edges);
         for e in &edges {
             assert!(g.has_edge(Node(e.0), Node(e.1)));
@@ -313,8 +434,7 @@ mod test {
 
     #[test]
     fn dfs() {
-        let edges = example_edges();
-        let g = init(&edges);
+        let g = graph_from(example_edges_cyclic);
         let mut visited = Vec::new();
         let visit = |n: Node| visited.push(n);
         crate::dfs(&g, visit);
@@ -330,8 +450,7 @@ mod test {
 
     #[test]
     fn bfs() {
-        let edges = example_edges();
-        let g = init(&edges);
+        let g = graph_from(example_edges_cyclic);
         let mut visited = Vec::new();
         let visit = |n: Node| visited.push(n);
         crate::bfs(&g, visit);
@@ -343,5 +462,34 @@ mod test {
         .map(Node)
         .collect();
         assert_eq!(visited, expected);
+    }
+
+    #[test]
+    fn topsort_trivial() {
+        let g = example_graph_trivial();
+        let out = super::topsort(&g);
+        check_ordering("topsort_straight", &g, &out, &[0, 2, 1]);
+    }
+
+    #[test]
+    fn topsort_straight() {
+        let g = init(&[(0, 1), (1, 2), (2, 3), (3, 4)]);
+        let out = super::topsort(&g);
+        check_ordering("topsort_straight", &g, &out, &[0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn topsort_2() {
+        let g = init(&[(0, 1), (2, 1), (1, 3), (4, 3)]);
+        let out = super::topsort(&g);
+        check_ordering("topsort_2", &g, &out, &[4, 2, 0, 1, 3]);
+    }
+
+    #[test]
+    fn topsort_dag_example() {
+        let g = graph_from(example_edges_dag);
+        let expected = &[15, 14, 8, 9, 17, 16, 7, 10, 11, 12, 13, 6, 5, 0, 1, 4, 3, 2];
+        let out = super::topsort(&g);
+        check_ordering("topsort_dag_example", &g, &out, expected);
     }
 }
