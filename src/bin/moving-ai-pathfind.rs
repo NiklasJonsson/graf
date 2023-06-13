@@ -36,7 +36,7 @@ mod dbg {
     ) {
         use std::fs::File;
 
-        let mut file = File::create(&path).expect(&format!("Bad path: {}", path.display()));
+        let mut file = File::create(path).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
         let mut data = Vec::with_capacity(width * height);
         data.resize(width * height, false);
         for n in graph.nodes() {
@@ -56,13 +56,13 @@ mod dbg {
                     write!(file, "T").unwrap();
                 }
             }
-            writeln!(file, "").unwrap();
+            writeln!(file).unwrap();
         }
     }
 
     pub fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, fpath: &Path) {
         use std::fs::File;
-        let mut file = File::create(&fpath).expect(&format!("Bad path: {}", fpath.display()));
+        let mut file = File::create(fpath).unwrap_or_else(|_| panic!("Bad path: {}", fpath.display()));
         for node in graph.nodes() {
             write!(file, "{:?} ({:?}):", node, node2coord[&node]).unwrap();
             let mut first = true;
@@ -73,7 +73,7 @@ mod dbg {
                 first = false;
                 write!(file, "{:?} ({:?})", child, node2coord[child]).unwrap();
             }
-            writeln!(file, "").unwrap();
+            writeln!(file).unwrap();
         }
     }
 
@@ -133,7 +133,7 @@ fn run_single_scenario(
         (x.powi(2) + y.powi(2)).sqrt()
     };
 
-    let path = graf::shortest_path(&graph, start, end, heuristic).expect("Failed to find path");
+    let path = graf::shortest_path(graph, start, end, heuristic).expect("Failed to find path");
     let cost = path
         .iter()
         .fold(0.0, |acc, Edge { node: _, cost }| acc + cost) as f64;
@@ -187,11 +187,11 @@ fn run_for_scenario_file(
     }
 
     if let Some(o) = output_map {
-        dbg::dump_map_format(&graph, &node2coord, raw_map.width(), raw_map.height(), &o);
+        dbg::dump_map_format(&graph, &node2coord, raw_map.width(), raw_map.height(), o);
     }
 
     if let Some(o) = output_graph {
-        dbg::dump_graph(&graph, &node2coord, &o);
+        dbg::dump_graph(&graph, &node2coord, o);
     }
 
     for scenario in scenarios.iter() {

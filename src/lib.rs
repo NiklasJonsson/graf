@@ -396,7 +396,7 @@ mod test {
             if !s.is_empty() {
                 s.truncate(s.len() - 1);
             }
-            return s;
+            s
         }
 
         let expected_nodes: Vec<Node> = expected.iter().copied().map(Node).collect();
@@ -408,7 +408,7 @@ mod test {
             println!("{}", fmt(actual));
             let filename = format!("{name}.dot");
             println!("Writing {filename}");
-            std::fs::write(filename, crate::fmt::to_dot(&origin)).unwrap();
+            std::fs::write(filename, crate::fmt::to_dot(origin)).unwrap();
             assert!(false);
         }
     }
