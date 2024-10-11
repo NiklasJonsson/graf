@@ -180,8 +180,8 @@ fn dfs_at_impl(
     queue.clear();
     queue.push_back(n);
     while let Some(n) = queue.pop_back() {
-        let already_visited = visited.add(n);
-        if already_visited {
+        let new = visited.add(n);
+        if !new {
             continue;
         }
         visit(n);

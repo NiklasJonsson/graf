@@ -16,14 +16,27 @@ impl NodeSet {
         }
     }
 
+    /// Add a node to this set.
+    /// Returns true if the node was not already in the set.
     pub fn add(&mut self, n: Node) -> bool {
         let i = n.0;
         if i >= self.v.len() {
             self.v.resize(i + 1, false);
         }
-        let existed = self.v[i];
+        let new = !self.v[i];
         self.v[i] = true;
-        existed
+        new
+    }
+
+    pub fn add_many(&mut self, nodes: &[Node]) -> usize {
+        let mut count = 0;
+        for n in nodes {
+            let added = self.add(*n);
+            if added {
+                count += 1;
+            }
+        }
+        count
     }
 
     pub fn has(&self, n: Node) -> bool {
@@ -46,6 +59,17 @@ impl NodeSet {
         }
     }
 
+    pub fn remove_many(&mut self, nodes: &[Node]) -> usize {
+        let mut count = 0;
+        for n in nodes {
+            let removed = self.remove(*n);
+            if removed {
+                count += 1;
+            }
+        }
+        count
+    }
+
     pub fn to_vec(self) -> Vec<Node> {
         self.v
             .into_iter()
@@ -55,16 +79,21 @@ impl NodeSet {
     }
 
     pub fn is_empty(&self) -> bool {
-        for &v in self.v.iter() {
-            if v {
-                return false;
-            }
+        if self.v.is_empty() {
+            true
+        } else {
+            self.v.iter().all(|v| !v)
         }
-        true
     }
 
     pub fn size(&self) -> usize {
         self.v.iter().filter(|&&x| x).count()
+    }
+
+    pub fn clear(&mut self) {
+        for v in &mut self.v {
+            *v = false;
+        }
     }
 }
 
@@ -94,8 +123,8 @@ mod test {
     fn with_capacity_insert() {
         let mut set = NodeSet::with_capacity(30);
         let nodes: Vec<Node> = (0..10).map(Node).collect();
-        let exists = set.add(nodes[9]);
-        assert!(!exists);
+        let new = set.add(nodes[9]);
+        assert!(new);
         assert!(set.has(nodes[9]));
         for &n in &nodes[0..9] {
             assert!(!set.has(n));
@@ -104,18 +133,79 @@ mod test {
     }
 
     #[test]
+    fn is_empty() {
+        let mut set = NodeSet::with_capacity(30);
+        let nodes: Vec<Node> = (0..10).map(Node).collect();
+        assert!(set.is_empty());
+        set.add(nodes[0]);
+        assert!(!set.is_empty());
+
+        set.add(nodes[0]);
+        assert!(!set.is_empty());
+
+        set.add(nodes[1]);
+        set.add(nodes[2]);
+        assert!(!set.is_empty());
+
+        set.remove_many(&nodes[0..=2]);
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn add_many() {
+        let mut set = NodeSet::with_capacity(30);
+        let nodes: Vec<Node> = (0..10).map(Node).collect();
+
+        {
+            let count = set.add_many(&nodes[0..1]);
+            assert_eq!(count, 1);
+            assert!(set.has(nodes[0]));
+        }
+
+        {
+            let count = set.add_many(&nodes[0..3]);
+            assert_eq!(count, 2);
+            assert!(set.has(nodes[0]));
+            assert!(set.has(nodes[1]));
+            assert!(set.has(nodes[2]));
+        }
+    }
+
+    #[test]
+    fn clear() {
+        let mut set = NodeSet::with_capacity(30);
+        let nodes: Vec<Node> = (0..10).map(Node).collect();
+        assert!(set.is_empty());
+        set.add(nodes[0]);
+        set.clear();
+        assert!(set.is_empty());
+
+        set.add(nodes[0]);
+        set.add(nodes[1]);
+        assert!(!set.is_empty());
+        set.clear();
+        assert!(set.is_empty());
+
+        for node in nodes {
+            assert!(!set.has(node));
+        }
+    }
+
+    #[test]
     fn simple() {
         let mut set = NodeSet::with_capacity(30);
         let nodes: Vec<Node> = (0..10).map(Node).collect();
+        assert!(set.is_empty());
         for (i, &n) in nodes.iter().enumerate() {
             if i % 2 == 0 {
-                let exists = set.add(n);
-                assert!(!exists);
+                let added = set.add(n);
+                assert!(added);
                 assert!(set.has(n));
             } else {
                 assert!(!set.has(n));
             }
         }
+        assert!(!set.is_empty());
 
         for (i, &n) in nodes.iter().enumerate() {
             if i % 2 == 0 {
@@ -124,5 +214,8 @@ mod test {
                 assert!(!set.has(n));
             }
         }
+
+        set.clear();
+        assert!(set.is_empty());
     }
 }
