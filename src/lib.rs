@@ -1,5 +1,3 @@
-#![feature(trait_alias)]
-
 use std::collections::VecDeque;
 use std::{cmp::Ordering, collections::BinaryHeap};
 
@@ -9,6 +7,8 @@ mod set;
 
 pub use map::NodeMap;
 pub use set::NodeSet;
+
+pub use fmt::to_dot;
 
 // TODO: Remove
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -180,10 +180,10 @@ fn dfs_at_impl(
     queue.clear();
     queue.push_back(n);
     while let Some(n) = queue.pop_back() {
-        if visited.has(n) {
+        let already_visited = visited.add(n);
+        if already_visited {
             continue;
         }
-        visited.add(n);
         visit(n);
         for &Edge { node: child, .. } in g.edges(n) {
             queue.push_back(child);
@@ -252,13 +252,15 @@ fn reconstruct(start: &Node, end: &Node, parents: &NodeMap<Edge>) -> Option<Path
     }
 }
 
-pub trait HeuristicDistanceFn = Fn(&Node) -> Cost;
+pub trait HeuristicDistance {
+    fn cost(&self, node: &Node) -> Cost;
+}
 
 pub fn shortest_path(
     g: &AdjacencyList,
     start: Node,
     end: Node,
-    heuristic: impl HeuristicDistanceFn,
+    heuristic: impl HeuristicDistance,
 ) -> Option<Path> {
     a_star(g, start, end, heuristic)
 }
@@ -267,7 +269,7 @@ pub fn a_star(
     g: &AdjacencyList,
     start: Node,
     end: Node,
-    heuristic: impl HeuristicDistanceFn,
+    heuristic: impl HeuristicDistance,
 ) -> Option<Path> {
     if g.nodes.is_empty() || start == end {
         return None;
@@ -291,7 +293,7 @@ pub fn a_star(
                 parents.insert(child, edge(cur, cost));
 
                 if !queue.iter().any(|e| e.node == child) {
-                    let estimated_end_cost = start_to_child_cost + heuristic(&child);
+                    let estimated_end_cost = start_to_child_cost + heuristic.cost(&child);
                     queue.push(edge(child, estimated_end_cost));
                 }
             }

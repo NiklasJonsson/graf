@@ -36,7 +36,8 @@ mod dbg {
     ) {
         use std::fs::File;
 
-        let mut file = File::create(path).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
+        let mut file =
+            File::create(path).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
         let mut data = Vec::with_capacity(width * height);
         data.resize(width * height, false);
         for n in graph.nodes() {
@@ -62,7 +63,8 @@ mod dbg {
 
     pub fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, fpath: &Path) {
         use std::fs::File;
-        let mut file = File::create(fpath).unwrap_or_else(|_| panic!("Bad path: {}", fpath.display()));
+        let mut file =
+            File::create(fpath).unwrap_or_else(|_| panic!("Bad path: {}", fpath.display()));
         for node in graph.nodes() {
             write!(file, "{:?} ({:?}):", node, node2coord[&node]).unwrap();
             let mut first = true;
@@ -111,6 +113,23 @@ fn neighbors(map: &MovingAiMap, tile: Coords2D) -> Vec<(Coords2D, Cost)> {
         .collect()
 }
 
+struct HeuristicDistance<'a> {
+    node2coord: &'a NodeMap<Coords2D>,
+    goal_pos: Coords2D,
+}
+
+impl<'a> graf::HeuristicDistance for HeuristicDistance<'a> {
+    fn cost(&self, node: &Node) -> Cost {
+        let (n_x, n_y) = self
+            .node2coord
+            .get(node)
+            .expect("Unrecognized node, no matching coords");
+        let x = self.goal_pos.0 as Cost - *n_x as Cost;
+        let y = self.goal_pos.1 as Cost - *n_y as Cost;
+        (x.powi(2) + y.powi(2)).sqrt()
+    }
+}
+
 fn run_single_scenario(
     scenario: &movingai::SceneRecord,
     graph: &AdjacencyList,
@@ -124,13 +143,9 @@ fn run_single_scenario(
         .get(&scenario.goal_pos)
         .expect("This should have a node assigned");
 
-    let heuristic = |n: &Node| -> Cost {
-        let (n_x, n_y) = node2coord
-            .get(n)
-            .expect("Unrecognized node, no matching coords");
-        let x = scenario.goal_pos.0 as Cost - *n_x as Cost;
-        let y = scenario.goal_pos.1 as Cost - *n_y as Cost;
-        (x.powi(2) + y.powi(2)).sqrt()
+    let heuristic = HeuristicDistance {
+        node2coord,
+        goal_pos: scenario.goal_pos,
     };
 
     let path = graf::shortest_path(graph, start, end, heuristic).expect("Failed to find path");

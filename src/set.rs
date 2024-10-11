@@ -1,5 +1,6 @@
 use crate::Node;
 // TODO: Bitset
+#[derive(Default, Debug)]
 pub struct NodeSet {
     v: Vec<bool>,
 }
@@ -15,12 +16,14 @@ impl NodeSet {
         }
     }
 
-    pub fn add(&mut self, n: Node) {
+    pub fn add(&mut self, n: Node) -> bool {
         let i = n.0;
         if i >= self.v.len() {
             self.v.resize(i + 1, false);
         }
+        let existed = self.v[i];
         self.v[i] = true;
+        existed
     }
 
     pub fn has(&self, n: Node) -> bool {
@@ -91,7 +94,8 @@ mod test {
     fn with_capacity_insert() {
         let mut set = NodeSet::with_capacity(30);
         let nodes: Vec<Node> = (0..10).map(Node).collect();
-        set.add(nodes[9]);
+        let exists = set.add(nodes[9]);
+        assert!(!exists);
         assert!(set.has(nodes[9]));
         for &n in &nodes[0..9] {
             assert!(!set.has(n));
@@ -105,7 +109,8 @@ mod test {
         let nodes: Vec<Node> = (0..10).map(Node).collect();
         for (i, &n) in nodes.iter().enumerate() {
             if i % 2 == 0 {
-                set.add(n);
+                let exists = set.add(n);
+                assert!(!exists);
                 assert!(set.has(n));
             } else {
                 assert!(!set.has(n));

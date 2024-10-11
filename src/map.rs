@@ -1,5 +1,6 @@
 use crate::Node;
 
+#[derive(Default, Debug)]
 pub struct NodeMap<T> {
     v: Vec<Option<T>>,
 }
