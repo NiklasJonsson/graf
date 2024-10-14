@@ -209,19 +209,26 @@ fn run_for_scenario_file(
         dbg::dump_graph(&graph, &node2coord, o);
     }
 
+    println!("Scenario count: {}", scenarios.len());
+    println!("Graph size: {}", graph.len());
     for scenario in scenarios.iter() {
         run_single_scenario(scenario, &graph, &coord2node, &node2coord);
     }
 }
 
 fn run(cli: Cli) {
+    let start = std::time::Instant::now();
     let path = &cli.scenario;
     if path.is_dir() {
         let itr = std::fs::read_dir(path).expect("Failed to read directory contents");
         for path in itr {
             let path = path.expect("Failed to read path");
             if path.file_name().to_str().unwrap().ends_with(".scen") {
-                println!("Running for scene {p}", p = path.path().display());
+                println!(
+                    "Running for scene {p}. (cargo run --release -- {p} {m})",
+                    p = path.path().display(),
+                    m = cli.maps_dir.display(),
+                );
                 run_for_scenario_file(
                     &path.path(),
                     &cli.maps_dir,
@@ -233,6 +240,7 @@ fn run(cli: Cli) {
     } else {
         run_for_scenario_file(path, &cli.maps_dir, &cli.output_map, &cli.output_graph);
     }
+    println!("Took {} s to run", start.elapsed().as_secs_f32());
 }
 
 fn main() {

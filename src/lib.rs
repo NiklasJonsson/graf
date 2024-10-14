@@ -136,7 +136,7 @@ impl AdjacencyList {
         (0..self.nodes.len()).map(Node)
     }
 
-    pub fn size(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
@@ -156,7 +156,7 @@ impl AdjacencyList {
 }
 
 pub fn compute_roots(g: &AdjacencyList) -> Vec<Node> {
-    let mut roots: NodeSet = NodeSet::with_capacity(g.size());
+    let mut roots: NodeSet = NodeSet::with_capacity(g.len());
     for n in g.nodes() {
         roots.add(n);
     }
@@ -214,7 +214,7 @@ pub fn bfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
     }
 
     let mut queue = VecDeque::new();
-    let mut visited = NodeSet::with_capacity(g.size());
+    let mut visited = NodeSet::with_capacity(g.len());
 
     for n in g.nodes() {
         if visited.has(n) {
@@ -275,9 +275,9 @@ pub fn a_star(
         return None;
     }
 
-    let mut node_cost: NodeMap<Cost> = NodeMap::with_capacity(g.size());
-    let mut parents: NodeMap<Edge> = NodeMap::with_capacity(g.size());
-    let mut queue: BinaryHeap<Edge> = std::collections::BinaryHeap::new();
+    let mut node_cost: NodeMap<Cost> = NodeMap::with_capacity(g.len());
+    let mut parents: NodeMap<Edge> = NodeMap::with_capacity(g.len());
+    let mut queue: BinaryHeap<Edge> = std::collections::BinaryHeap::with_capacity(g.len());
     node_cost.insert(start, 0.0);
     queue.push(edge(start, 0.0));
 
