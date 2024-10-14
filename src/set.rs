@@ -157,6 +157,11 @@ mod test {
         let nodes: Vec<Node> = (0..10).map(Node).collect();
 
         {
+            let count = set.add_many(&[]);
+            assert_eq!(count, 0);
+        }
+
+        {
             let count = set.add_many(&nodes[0..1]);
             assert_eq!(count, 1);
             assert!(set.has(nodes[0]));
@@ -168,6 +173,38 @@ mod test {
             assert!(set.has(nodes[0]));
             assert!(set.has(nodes[1]));
             assert!(set.has(nodes[2]));
+        }
+    }
+
+    #[test]
+    fn remove_many() {
+        let mut set = NodeSet::with_capacity(30);
+        let nodes: Vec<Node> = (0..10).map(Node).collect();
+
+        {
+            let count = set.remove_many(&[]);
+            assert_eq!(count, 0)
+        }
+
+        {
+            let count = set.remove_many(&nodes[0..10]);
+            assert_eq!(count, 0)
+        }
+
+        set.add_many(&nodes[0..10]);
+
+        {
+            let count = set.remove_many(&nodes[0..1]);
+            assert_eq!(count, 1);
+            assert!(!set.has(nodes[0]));
+        }
+
+        {
+            let count = set.remove_many(&nodes[0..3]);
+            assert_eq!(count, 2);
+            assert!(!set.has(nodes[0]));
+            assert!(!set.has(nodes[1]));
+            assert!(!set.has(nodes[2]));
         }
     }
 
