@@ -21,7 +21,10 @@ mod dot {
 
         for n in g.nodes() {
             for e in g.edges(n) {
-                out.push_str(&format!("{} -> {} [label = \"{}\"];\n", n, e.node, e.cost));
+                out.push_str(&format!(
+                    "{} -> {} [label = \"{}\"];\n",
+                    n, e.node, e.weight
+                ));
             }
         }
 

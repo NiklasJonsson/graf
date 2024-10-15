@@ -26,18 +26,18 @@ impl std::fmt::Display for Node {
     }
 }
 
-pub type Cost = f32;
+pub type Weight = f32;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Edge {
     pub node: Node,
-    pub cost: Cost,
+    pub weight: Weight,
 }
 impl Eq for Edge {}
 impl Ord for Edge {
     fn cmp(&self, o: &Self) -> Ordering {
-        o.cost
-            .partial_cmp(&self.cost)
+        o.weight
+            .partial_cmp(&self.weight)
             .expect("Invalid float")
             .then_with(|| self.node.cmp(&o.node))
     }
@@ -48,13 +48,33 @@ impl PartialOrd for Edge {
     }
 }
 
-fn edge(n: Node, c: Cost) -> Edge {
-    Edge { node: n, cost: c }
+fn edge(n: Node, weight: Weight) -> Edge {
+    Edge { node: n, weight }
 }
 
-impl From<(Node, Cost)> for Edge {
-    fn from((node, cost): (Node, Cost)) -> Self {
-        Edge { node, cost }
+impl From<(Node, Weight)> for Edge {
+    fn from((node, weight): (Node, Weight)) -> Self {
+        Edge { node, weight }
+    }
+}
+
+struct NodeInfo {
+    offset: usize,
+    len: usize,
+}
+
+// Impl for converting to jagged array
+fn lock_graph(g: AdjacencyList) {
+    let nodes: Vec<Vec<Edge>> = g.nodes;
+    let len: usize = nodes.iter().map(|inner| inner.iter().count()).sum();
+    let mut node_data: Vec<Edge> = Vec::with_capacity(len);
+    let mut node_info: Vec<NodeInfo> = Vec::with_capacity(nodes.len());
+
+    for mut edges in nodes {
+        let len = edges.len();
+        let offset = node_data.len();
+        node_data.append(&mut edges);
+        node_info.push(NodeInfo { offset, len });
     }
 }
 
@@ -82,7 +102,7 @@ impl AdjacencyList {
         n.0 < self.nodes.len()
     }
 
-    pub fn add_edge(&mut self, a: Node, b: Node, c: Cost) {
+    pub fn add_edge(&mut self, a: Node, b: Node, c: Weight) {
         assert!(self.is_valid(a) && self.is_valid(b));
         if self.has_directed_edge_unchecked(a, b) {
             return;
@@ -241,8 +261,11 @@ fn reconstruct(start: &Node, end: &Node, parents: &NodeMap<Edge>) -> Option<Path
     let mut child = *end;
     let mut path = Path::new();
     loop {
-        let Edge { node: parent, cost } = *parents.get(&child)?;
-        path.push(edge(child, cost));
+        let Edge {
+            node: parent,
+            weight,
+        } = *parents.get(&child)?;
+        path.push(edge(child, weight));
         child = parent;
         if child == *start {
             path.push(edge(*start, 0.0));
@@ -253,7 +276,7 @@ fn reconstruct(start: &Node, end: &Node, parents: &NodeMap<Edge>) -> Option<Path
 }
 
 pub trait HeuristicDistance {
-    fn cost(&self, node: &Node) -> Cost;
+    fn cost(&self, node: &Node) -> Weight;
 }
 
 pub fn shortest_path(
@@ -275,7 +298,7 @@ pub fn a_star(
         return None;
     }
 
-    let mut node_cost: NodeMap<Cost> = NodeMap::with_capacity(g.len());
+    let mut node_cost: NodeMap<Weight> = NodeMap::with_capacity(g.len());
     let mut parents: NodeMap<Edge> = NodeMap::with_capacity(g.len());
     let mut queue: BinaryHeap<Edge> = std::collections::BinaryHeap::with_capacity(g.len());
     node_cost.insert(start, 0.0);
@@ -286,7 +309,11 @@ pub fn a_star(
             return reconstruct(&start, &end, &parents);
         }
 
-        for &Edge { node: child, cost } in g.edges(cur) {
+        for &Edge {
+            node: child,
+            weight: cost,
+        } in g.edges(cur)
+        {
             let start_to_child_cost = node_cost[cur] + cost;
             if !node_cost.has(&child) || start_to_child_cost < node_cost[child] {
                 node_cost.insert(child, start_to_child_cost);

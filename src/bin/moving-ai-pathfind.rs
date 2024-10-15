@@ -1,4 +1,4 @@
-use graf::{AdjacencyList, Cost, Edge, Node, NodeMap};
+use graf::{AdjacencyList, Edge, Node, NodeMap, Weight};
 
 use clap::Parser;
 use movingai::{
@@ -81,7 +81,7 @@ mod dbg {
 
     pub fn dump_path(gpath: &graf::Path, node2coord: &NodeMap<Coords2D>) {
         let mut total = 0.0;
-        for Edge { node, cost } in gpath {
+        for Edge { node, weight: cost } in gpath {
             let c = node2coord[node];
             total += cost;
             println!("({:?}, {})", c, cost);
@@ -90,11 +90,11 @@ mod dbg {
         println!("total: {}", total);
     }
 }
-const DIAG_COST: Cost = std::f32::consts::SQRT_2;
-const STRAIGHT_COST: Cost = 1.0;
-fn neighbors(map: &MovingAiMap, tile: Coords2D) -> Vec<(Coords2D, Cost)> {
+const DIAG_COST: Weight = std::f32::consts::SQRT_2;
+const STRAIGHT_COST: Weight = 1.0;
+fn neighbors(map: &MovingAiMap, tile: Coords2D) -> Vec<(Coords2D, Weight)> {
     let (x, y) = (tile.0 as isize, tile.1 as isize);
-    let all: Vec<((isize, isize), Cost)> = vec![
+    let all: Vec<((isize, isize), Weight)> = vec![
         ((x + 1, y), STRAIGHT_COST),
         ((x + 1, y + 1), DIAG_COST),
         ((x + 1, y - 1), DIAG_COST),
@@ -119,13 +119,13 @@ struct HeuristicDistance<'a> {
 }
 
 impl<'a> graf::HeuristicDistance for HeuristicDistance<'a> {
-    fn cost(&self, node: &Node) -> Cost {
+    fn cost(&self, node: &Node) -> Weight {
         let (n_x, n_y) = self
             .node2coord
             .get(node)
             .expect("Unrecognized node, no matching coords");
-        let x = self.goal_pos.0 as Cost - *n_x as Cost;
-        let y = self.goal_pos.1 as Cost - *n_y as Cost;
+        let x = self.goal_pos.0 as Weight - *n_x as Weight;
+        let y = self.goal_pos.1 as Weight - *n_y as Weight;
         (x.powi(2) + y.powi(2)).sqrt()
     }
 }
@@ -149,9 +149,14 @@ fn run_single_scenario(
     };
 
     let path = graf::shortest_path(graph, start, end, heuristic).expect("Failed to find path");
-    let cost = path
-        .iter()
-        .fold(0.0, |acc, Edge { node: _, cost }| acc + cost) as f64;
+    let cost = path.iter().fold(
+        0.0,
+        |acc,
+         Edge {
+             node: _,
+             weight: cost,
+         }| acc + cost,
+    ) as f64;
     let expected = scenario.optimal_length;
     let diff = (expected - cost).abs();
     if diff > 0.001 {
