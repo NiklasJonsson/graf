@@ -16,14 +16,14 @@ struct NodeInfo {
 // Impl for converting to jagged array
 fn lock_graph(g: &AdjacencyList) -> ImmutableAdjacencyList {
     let nodes: &[Vec<Edge>] = &g.nodes;
-    let len: usize = nodes.iter().map(|inner| inner.iter().count()).sum();
+    let len: usize = nodes.iter().map(|inner| inner.len()).sum();
     let mut node_data: Vec<Edge> = Vec::with_capacity(len);
     let mut node_info: Vec<NodeInfo> = Vec::with_capacity(nodes.len());
 
     for edges in nodes {
         let len = edges.len();
         let offset = node_data.len();
-        node_data.extend_from_slice(&edges);
+        node_data.extend_from_slice(edges);
         node_info.push(NodeInfo { offset, len });
     }
 
@@ -103,7 +103,7 @@ pub fn a_star(
 
     while let Some(Edge { node: cur, .. }) = queue.pop() {
         if cur == end {
-            return walk_backwards(&start, &end, &parents);
+            return walk_backwards(&start, &end, parents);
         }
 
         for &Edge {

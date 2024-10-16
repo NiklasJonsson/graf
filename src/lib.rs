@@ -369,7 +369,7 @@ mod test {
             let filename = format!("{name}.dot");
             println!("Writing {filename}");
             std::fs::write(filename, crate::fmt::to_dot(origin)).unwrap();
-            assert!(false);
+            panic!("The ordering check failed, aboorting test");
         }
     }
 
