@@ -78,4 +78,8 @@ impl<T> NodeMap<T> {
             self.v[n.0].take()
         }
     }
+
+    pub fn clear(&mut self) {
+        self.v.clear();
+    }
 }

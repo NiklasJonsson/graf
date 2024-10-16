@@ -1,16 +1,20 @@
+use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::{cmp::Ordering, collections::BinaryHeap};
 
+mod astar;
 mod fmt;
 mod map;
 mod set;
 
+pub use astar::{a_star, AStarAcceleration, HeuristicDistance};
 pub use map::NodeMap;
 pub use set::NodeSet;
 
 pub use fmt::to_dot;
 
-// TODO: Remove
+pub type Path = Vec<Edge>;
+
+// TODO: Remove?
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum GraphType {
     Directed,
@@ -55,26 +59,6 @@ fn edge(n: Node, weight: Weight) -> Edge {
 impl From<(Node, Weight)> for Edge {
     fn from((node, weight): (Node, Weight)) -> Self {
         Edge { node, weight }
-    }
-}
-
-struct NodeInfo {
-    offset: usize,
-    len: usize,
-}
-
-// Impl for converting to jagged array
-fn lock_graph(g: AdjacencyList) {
-    let nodes: Vec<Vec<Edge>> = g.nodes;
-    let len: usize = nodes.iter().map(|inner| inner.iter().count()).sum();
-    let mut node_data: Vec<Edge> = Vec::with_capacity(len);
-    let mut node_info: Vec<NodeInfo> = Vec::with_capacity(nodes.len());
-
-    for mut edges in nodes {
-        let len = edges.len();
-        let offset = node_data.len();
-        node_data.append(&mut edges);
-        node_info.push(NodeInfo { offset, len });
     }
 }
 
@@ -158,6 +142,10 @@ impl AdjacencyList {
 
     pub fn len(&self) -> usize {
         self.nodes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
     }
 
     pub fn inverted(&self) -> Self {
@@ -255,9 +243,7 @@ pub fn bfs(g: &AdjacencyList, mut visit: impl FnMut(Node)) {
     }
 }
 
-pub type Path = Vec<Edge>;
-
-fn reconstruct(start: &Node, end: &Node, parents: &NodeMap<Edge>) -> Option<Path> {
+fn walk_backwards(start: &Node, end: &Node, parents: &NodeMap<Edge>) -> Option<Path> {
     let mut child = *end;
     let mut path = Path::new();
     loop {
@@ -273,61 +259,6 @@ fn reconstruct(start: &Node, end: &Node, parents: &NodeMap<Edge>) -> Option<Path
             return Some(path);
         }
     }
-}
-
-pub trait HeuristicDistance {
-    fn cost(&self, node: &Node) -> Weight;
-}
-
-pub fn shortest_path(
-    g: &AdjacencyList,
-    start: Node,
-    end: Node,
-    heuristic: impl HeuristicDistance,
-) -> Option<Path> {
-    a_star(g, start, end, heuristic)
-}
-/// Find the shortest path between two nodes
-pub fn a_star(
-    g: &AdjacencyList,
-    start: Node,
-    end: Node,
-    heuristic: impl HeuristicDistance,
-) -> Option<Path> {
-    if g.nodes.is_empty() || start == end {
-        return None;
-    }
-
-    let mut node_cost: NodeMap<Weight> = NodeMap::with_capacity(g.len());
-    let mut parents: NodeMap<Edge> = NodeMap::with_capacity(g.len());
-    let mut queue: BinaryHeap<Edge> = std::collections::BinaryHeap::with_capacity(g.len());
-    node_cost.insert(start, 0.0);
-    queue.push(edge(start, 0.0));
-
-    while let Some(Edge { node: cur, .. }) = queue.pop() {
-        if cur == end {
-            return reconstruct(&start, &end, &parents);
-        }
-
-        for &Edge {
-            node: child,
-            weight: cost,
-        } in g.edges(cur)
-        {
-            let start_to_child_cost = node_cost[cur] + cost;
-            if !node_cost.has(&child) || start_to_child_cost < node_cost[child] {
-                node_cost.insert(child, start_to_child_cost);
-                parents.insert(child, edge(cur, cost));
-
-                if !queue.iter().any(|e| e.node == child) {
-                    let estimated_end_cost = start_to_child_cost + heuristic.cost(&child);
-                    queue.push(edge(child, estimated_end_cost));
-                }
-            }
-        }
-    }
-
-    None
 }
 
 pub fn topsort(g: &AdjacencyList) -> Vec<Node> {

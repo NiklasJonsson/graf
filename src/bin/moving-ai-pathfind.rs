@@ -132,7 +132,7 @@ impl<'a> graf::HeuristicDistance for HeuristicDistance<'a> {
 
 fn run_single_scenario(
     scenario: &movingai::SceneRecord,
-    graph: &AdjacencyList,
+    astar_acc: &mut graf::AStarAcceleration,
     coord2node: &HashMap<Coords2D, Node>,
     node2coord: &NodeMap<Coords2D>,
 ) {
@@ -148,7 +148,7 @@ fn run_single_scenario(
         goal_pos: scenario.goal_pos,
     };
 
-    let path = graf::shortest_path(graph, start, end, heuristic).expect("Failed to find path");
+    let path = graf::a_star(astar_acc, start, end, heuristic).expect("Failed to find path");
     let cost = path.iter().fold(
         0.0,
         |acc,
@@ -214,10 +214,12 @@ fn run_for_scenario_file(
         dbg::dump_graph(&graph, &node2coord, o);
     }
 
+    let mut astar_acc = graf::AStarAcceleration::new(&graph);
+
     println!("Scenario count: {}", scenarios.len());
     println!("Graph size: {}", graph.len());
     for scenario in scenarios.iter() {
-        run_single_scenario(scenario, &graph, &coord2node, &node2coord);
+        run_single_scenario(scenario, &mut astar_acc, &coord2node, &node2coord);
     }
 }
 
