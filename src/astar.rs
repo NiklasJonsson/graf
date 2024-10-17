@@ -2,6 +2,8 @@ use crate::{walk_backwards, AdjacencyList, Edge, Node, NodeMap, Path, Weight};
 
 use std::collections::BinaryHeap;
 
+// Jagged array implementation of a graph.
+// Based on https://zeux.io/2023/06/30/efficient-jagged-arrays/
 struct ImmutableAdjacencyList {
     node_data: Vec<Edge>,
     node_info: Vec<NodeInfo>,
