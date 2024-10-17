@@ -26,4 +26,4 @@ tar -xf data/dao-map.zip -C data/dao-map
 ## TODO
 
 * Update deps
-* Fix remaining optimal path failures/diff
+* Fix remaining optimal path failures/diff. Test with BFS for shortest path and compare.
