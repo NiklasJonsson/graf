@@ -14,13 +14,7 @@ pub use fmt::to_dot;
 
 pub type Path = Vec<Edge>;
 
-// TODO: Remove?
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum GraphType {
-    Directed,
-    Undirected,
-}
-
+// TODO: u32
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Node(usize);
 
@@ -65,14 +59,16 @@ impl From<(Node, Weight)> for Edge {
 #[derive(Clone)]
 pub struct AdjacencyList {
     nodes: Vec<Vec<Edge>>,
-    ty: GraphType,
 }
 
 impl AdjacencyList {
-    pub fn new(ty: GraphType) -> Self {
+    pub fn new() -> Self {
+        Self::with_capacity(0)
+    }
+
+    pub fn with_capacity(cap: usize) -> Self {
         Self {
-            nodes: Vec::new(),
-            ty,
+            nodes: Vec::with_capacity(cap),
         }
     }
 
@@ -92,14 +88,10 @@ impl AdjacencyList {
             return;
         }
         self.nodes[a.0].push(edge(b, c));
-        if self.ty == GraphType::Undirected {
-            assert!(self.has_directed_edge_unchecked(b, a));
-            self.nodes[b.0].push(edge(a, c));
-        }
     }
 
     fn has_directed_edge_unchecked(&self, a: Node, b: Node) -> bool {
-        return self.nodes[a.0].iter().any(|edge| edge.node == b);
+        self.nodes[a.0].iter().any(|edge| edge.node == b)
     }
 
     pub fn has_edge(&self, a: Node, b: Node) -> bool {
@@ -109,10 +101,6 @@ impl AdjacencyList {
 
         if self.has_directed_edge_unchecked(a, b) {
             return true;
-        }
-
-        if self.ty == GraphType::Undirected {
-            return self.has_directed_edge_unchecked(b, a);
         }
 
         false
@@ -149,7 +137,7 @@ impl AdjacencyList {
     }
 
     pub fn inverted(&self) -> Self {
-        let mut out = Self::new(self.ty);
+        let mut out = Self::new();
         out.nodes.reserve(self.nodes.len());
         for _ in self.nodes() {
             out.add_node();
@@ -288,10 +276,10 @@ pub fn topsort(g: &AdjacencyList) -> Vec<Node> {
 
 #[cfg(test)]
 mod test {
-    use crate::{AdjacencyList, GraphType, Node};
+    use crate::{AdjacencyList, Node};
 
     fn example_graph_trivial() -> AdjacencyList {
-        let mut g = AdjacencyList::new(GraphType::Directed);
+        let mut g = AdjacencyList::new();
         let ns: [Node; 3] = std::array::from_fn(|_| g.add_node());
 
         g.add_edge(ns[0], ns[1], 1.0);
@@ -322,7 +310,7 @@ mod test {
     }
 
     fn init(edges: &[(usize, usize)]) -> AdjacencyList {
-        let mut g = AdjacencyList::new(GraphType::Directed);
+        let mut g = AdjacencyList::new();
 
         let max = edges
             .iter()
@@ -374,13 +362,26 @@ mod test {
     }
 
     #[test]
-    fn add_simple() {
-        let mut g = AdjacencyList::new(GraphType::Directed);
+    fn add_edge() {
+        let mut g = AdjacencyList::new();
 
         let a = g.add_node();
         let b = g.add_node();
         g.add_edge(a, b, 1.0);
         assert!(g.has_edge(a, b));
+        assert!(!g.has_edge(b, a));
+    }
+
+    #[test]
+    fn add_unidirectional() {
+        let mut g = AdjacencyList::new();
+
+        let a = g.add_node();
+        let b = g.add_node();
+        g.add_edge(a, b, 1.0);
+        g.add_edge(b, a, 1.0);
+        assert!(g.has_edge(a, b));
+        assert!(g.has_edge(b, a));
     }
 
     #[test]

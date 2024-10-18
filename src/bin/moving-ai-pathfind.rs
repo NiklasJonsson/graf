@@ -1,12 +1,10 @@
 use graf::{AdjacencyList, Edge, Node, NodeMap, Weight};
 
 use clap::Parser;
-use movingai::{
-    parser::{parse_map_file, parse_scen_file},
-    MovingAiMap,
-};
 use movingai::{Coords2D, Map2D as _};
+use movingai::{MovingAiMap, SceneRecord};
 
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, io::Write};
 
@@ -16,7 +14,8 @@ struct Cli {
     /// The path to a .scen file from moving AI, or a directory of .scen files
     scenario: PathBuf,
     /// Maps directory
-    maps_dir: PathBuf,
+    #[arg(long)]
+    maps: PathBuf,
     #[arg(long)]
     output_graph: Option<PathBuf>,
     #[arg(long)]
@@ -34,8 +33,6 @@ mod dbg {
         height: usize,
         path: &Path,
     ) {
-        use std::fs::File;
-
         let mut file =
             File::create(path).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
         let mut data = Vec::with_capacity(width * height);
@@ -62,7 +59,6 @@ mod dbg {
     }
 
     pub fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, fpath: &Path) {
-        use std::fs::File;
         let mut file =
             File::create(fpath).unwrap_or_else(|_| panic!("Bad path: {}", fpath.display()));
         for node in graph.nodes() {
@@ -168,25 +164,30 @@ fn run_single_scenario(
     }
 }
 
+fn parse_scenario_file(file: &Path) -> (Vec<SceneRecord>, String) {
+    let scenarios = movingai::parser::parse_scen_file(file).unwrap();
+    let first_map = scenarios[0].map_file.clone();
+    let same = scenarios.iter().all(|s| s.map_file == first_map);
+    assert!(
+        same,
+        "All maps are not the same as {first_map} in {scenario}",
+        scenario = file.display()
+    );
+    (scenarios, first_map)
+}
+
 fn run_for_scenario_file(
     scenario: &Path,
     maps: &Path,
     output_map: &Option<PathBuf>,
     output_graph: &Option<PathBuf>,
 ) {
-    let scenarios = parse_scen_file(scenario).unwrap();
-    let first_map = scenarios[0].map_file.clone();
-    let same = scenarios.iter().all(|s| s.map_file == first_map);
-    assert!(
-        same,
-        "All maps are not the same as {first_map} in {scenario}",
-        scenario = scenario.display()
-    );
+    let (scenarios, first_map) = parse_scenario_file(scenario);
     let mut path = std::path::PathBuf::from(maps);
     path.push(first_map);
-    let raw_map = parse_map_file(&path).unwrap();
+    let raw_map = movingai::parser::parse_map_file(&path).unwrap();
     let size = raw_map.width() * raw_map.height();
-    let mut graph = AdjacencyList::new(graf::GraphType::Directed);
+    let mut graph = AdjacencyList::with_capacity(size);
     let mut coord2node = HashMap::<Coords2D, Node>::with_capacity(size);
     let mut node2coord = NodeMap::<Coords2D>::with_capacity(size);
 
@@ -200,7 +201,8 @@ fn run_for_scenario_file(
 
     for coord in raw_map.coords() {
         let n = coord2node[&coord];
-        for (neighbour, cost) in neighbors(&raw_map, coord) {
+        let neighbours = neighbors(&raw_map, coord);
+        for (neighbour, cost) in neighbours {
             let n2 = coord2node[&neighbour];
             graph.add_edge(n, n2, cost);
         }
@@ -232,20 +234,15 @@ fn run(cli: Cli) {
             let path = path.expect("Failed to read path");
             if path.file_name().to_str().unwrap().ends_with(".scen") {
                 println!(
-                    "Running for scene {p}. (cargo run --release -- {p} {m})",
+                    "Running for scene {p}. (cargo run --release -- {p} --maps {m})",
                     p = path.path().display(),
-                    m = cli.maps_dir.display(),
+                    m = cli.maps.display(),
                 );
-                run_for_scenario_file(
-                    &path.path(),
-                    &cli.maps_dir,
-                    &cli.output_map,
-                    &cli.output_graph,
-                );
+                run_for_scenario_file(&path.path(), &cli.maps, &cli.output_map, &cli.output_graph);
             }
         }
     } else {
-        run_for_scenario_file(path, &cli.maps_dir, &cli.output_map, &cli.output_graph);
+        run_for_scenario_file(path, &cli.maps, &cli.output_map, &cli.output_graph);
     }
     println!("Took {} s to run", start.elapsed().as_secs_f32());
 }

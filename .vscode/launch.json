@@ -9,7 +9,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/moving-ai-pathfind.exe",
-            "args": ["data/dao-scen/arena.map.scen", "--output-map", "map.txt", "--output-graph", "graph.txt"],
+            "args": ["--maps", "data/dao-map", "data/dao-scen/arena.map.scen", "--output-map", "map.txt", "--output-graph", "graph.txt"],
             "stopAtEntry": false,
             "cwd": "${workspaceRoot}",
             "environment": [],
