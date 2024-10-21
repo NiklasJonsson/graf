@@ -4,9 +4,8 @@ use clap::Parser;
 use movingai::{Coords2D, Map2D as _};
 use movingai::{MovingAiMap, SceneRecord};
 
-use std::fs::File;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::{collections::HashMap, io::Write};
 
 #[derive(Debug, Parser)]
 #[command(author, version)]
@@ -22,7 +21,6 @@ struct Cli {
     output_map: Option<PathBuf>,
 }
 
-#[allow(dead_code)]
 mod dbg {
     use super::*;
 
@@ -33,48 +31,48 @@ mod dbg {
         height: usize,
         path: &Path,
     ) {
-        let mut file =
-            File::create(path).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
-        let mut data = Vec::with_capacity(width * height);
-        data.resize(width * height, false);
+        let cap = width * height;
+        let mut data = Vec::new();
+        data.resize(cap, 'T');
+
         for n in graph.nodes() {
             for n2 in graph.edges(n).map(|x| x.node) {
                 let (x, y) = node2coord[n2];
-                data[x + width * y] = true;
+                data[x + width * y] = '.';
             }
         }
 
-        for i in 0..height {
-            let start = i * width;
-            let end = (i + 1) * width;
-            for &reachable in &data[start..end] {
-                if reachable {
-                    write!(file, ".").unwrap();
-                } else {
-                    write!(file, "T").unwrap();
-                }
+        let mut contents = String::with_capacity(cap + height);
+        for y in 0..height {
+            for x in 0..width {
+                let idx = x + width * y;
+                contents.push(data[idx]);
             }
-            writeln!(file).unwrap();
+            contents.push('\n');
         }
+
+        std::fs::write(path, contents).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
     }
 
-    pub fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, fpath: &Path) {
-        let mut file =
-            File::create(fpath).unwrap_or_else(|_| panic!("Bad path: {}", fpath.display()));
+    pub fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, path: &Path) {
+        use std::fmt::Write as _;
+        let mut contents = String::with_capacity(graph.len() * graph.len());
         for node in graph.nodes() {
-            write!(file, "{:?} ({:?}):", node, node2coord[&node]).unwrap();
+            write!(contents, "{:?} ({:?}):", node, node2coord[&node]).unwrap();
             let mut first = true;
             for child in graph.edges(node).map(|x| x.node) {
                 if !first {
-                    write!(file, ", ").unwrap();
+                    write!(contents, ", ").unwrap();
                 }
                 first = false;
-                write!(file, "{:?} ({:?})", child, node2coord[child]).unwrap();
+                write!(contents, "{:?} ({:?})", child, node2coord[child]).unwrap();
             }
-            writeln!(file).unwrap();
+            contents.push('\n');
         }
+        std::fs::write(path, contents).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
     }
 
+    #[allow(dead_code)]
     pub fn dump_path(gpath: &graf::Path, node2coord: &NodeMap<Coords2D>) {
         let mut total = 0.0;
         for Edge { node, weight: cost } in gpath {
