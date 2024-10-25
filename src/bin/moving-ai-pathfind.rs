@@ -56,16 +56,16 @@ mod dbg {
 
     pub fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, path: &Path) {
         use std::fmt::Write as _;
-        let mut contents = String::with_capacity(graph.len() * graph.len());
+        let mut contents = String::new();
         for node in graph.nodes() {
-            write!(contents, "{:?} ({:?}):", node, node2coord[&node]).unwrap();
+            write!(contents, "{} ({:?}):", node, node2coord[&node]).unwrap();
             let mut first = true;
             for child in graph.edges(node).map(|x| x.node) {
                 if !first {
                     write!(contents, ", ").unwrap();
                 }
                 first = false;
-                write!(contents, "{:?} ({:?})", child, node2coord[child]).unwrap();
+                write!(contents, "{} ({:?}), ", child, node2coord[child]).unwrap();
             }
             contents.push('\n');
         }
@@ -124,12 +124,29 @@ impl<'a> graf::HeuristicDistance for HeuristicDistance<'a> {
     }
 }
 
+struct ScenarioResult {
+    path: graf::Path,
+}
+
+impl ScenarioResult {
+    fn cost(&self) -> Weight {
+        self.path.iter().fold(
+            0.0,
+            |acc,
+             Edge {
+                 node: _,
+                 weight: cost,
+             }| acc + cost,
+        )
+    }
+}
+
 fn run_single_scenario(
     scenario: &movingai::SceneRecord,
     astar_acc: &mut graf::AStarAcceleration,
     coord2node: &HashMap<Coords2D, Node>,
     node2coord: &NodeMap<Coords2D>,
-) {
+) -> ScenarioResult {
     let start = *coord2node
         .get(&scenario.start_pos)
         .expect("This should have a node assigned");
@@ -143,23 +160,8 @@ fn run_single_scenario(
     };
 
     let path = graf::a_star(astar_acc, start, end, heuristic).expect("Failed to find path");
-    let cost = path.iter().fold(
-        0.0,
-        |acc,
-         Edge {
-             node: _,
-             weight: cost,
-         }| acc + cost,
-    ) as f64;
-    let expected = scenario.optimal_length;
-    let diff = (expected - cost).abs();
-    if diff > 0.001 {
-        println!("shortest path mismatch: {}", diff);
-        println!(
-            "start: {:?}, end: {:?}",
-            scenario.start_pos, scenario.goal_pos
-        );
-    }
+
+    ScenarioResult { path }
 }
 
 fn parse_scenario_file(file: &Path) -> (Vec<SceneRecord>, String) {
@@ -174,6 +176,139 @@ fn parse_scenario_file(file: &Path) -> (Vec<SceneRecord>, String) {
     (scenarios, first_map)
 }
 
+mod refimpl {
+    use std::cmp::Ordering;
+    use std::collections::BinaryHeap;
+    use std::path::Path;
+    use std::time::Instant;
+
+    use movingai::parser::parse_map_file;
+    use movingai::parser::parse_scen_file;
+    use movingai::Coords2D;
+    use movingai::Map2D;
+    use movingai::MovingAiMap;
+
+    #[derive(Debug)]
+    struct SearchNode {
+        pub f: f64,
+        pub h: f64,
+        pub g: f64,
+        pub current: Coords2D,
+    }
+
+    impl PartialEq for SearchNode {
+        fn eq(&self, other: &SearchNode) -> bool {
+            self.current == other.current
+        }
+    }
+
+    impl Eq for SearchNode {
+        // add code here
+    }
+
+    impl PartialOrd for SearchNode {
+        fn partial_cmp(&self, other: &SearchNode) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for SearchNode {
+        fn cmp(&self, other: &SearchNode) -> Ordering {
+            // This is reversed on purpose to make the max-heap into min-heap.
+            if self.f < other.f {
+                Ordering::Greater
+            } else if self.f > other.f {
+                Ordering::Less
+            } else {
+                Ordering::Equal
+            }
+        }
+    }
+
+    fn distance(a: Coords2D, b: Coords2D) -> f64 {
+        let (x, y) = (a.0 as f64, a.1 as f64);
+        let (p, q) = (b.0 as f64, b.1 as f64);
+        ((x - p) * (x - p) + (y - q) * (y - q)).sqrt()
+    }
+
+    fn shortest_path(map: &MovingAiMap, start: Coords2D, goal: Coords2D) -> Option<f64> {
+        let mut heap = BinaryHeap::new();
+        let mut visited = Vec::<Coords2D>::new();
+
+        // We're at `start`, with a zero cost
+        heap.push(SearchNode {
+            f: 0.0,
+            g: 0.0,
+            h: distance(start, goal),
+            current: start,
+        });
+
+        while let Some(SearchNode {
+            f: _f,
+            g,
+            h: _h,
+            current,
+        }) = heap.pop()
+        {
+            if current == goal {
+                return Some(g);
+            }
+
+            if visited.contains(&current) {
+                continue;
+            }
+
+            visited.push(current);
+
+            for neigh in map.neighbors(current) {
+                let new_h = distance(neigh, goal);
+                let i = distance(neigh, current);
+                let next = SearchNode {
+                    f: g + i + new_h,
+                    g: g + i,
+                    h: new_h,
+                    current: neigh,
+                };
+                heap.push(next);
+            }
+        }
+
+        // Goal not reachable
+        None
+    }
+
+    pub fn run_for_scenario_file(map_path: &Path, scenario: &Path) {
+        // TODO: Make this return the path and diff compared to my impl.
+        let map = parse_map_file(map_path).unwrap();
+        let scenes = parse_scen_file(scenario).unwrap();
+        for scene in scenes {
+            let start = scene.start_pos;
+            let goal = scene.goal_pos;
+            let optimal = scene.optimal_length;
+            let t = Instant::now();
+            match shortest_path(&map, start, goal) {
+                Some(g) => {
+                    let duration = t.elapsed();
+                    let millis = duration.as_millis();
+                    let delta = (optimal - g).abs();
+                    if delta > 0.00001 {
+                        println!(
+                            "{:?} -> {:?} = {:.5} \t\tin {:.5} ms (Δ{:.5})",
+                            start, goal, g, millis, delta
+                        );
+                    } else {
+                        println!(
+                            "{:?} -> {:?} = {:.5} \t\tin {:.5} ms",
+                            start, goal, g, millis
+                        );
+                    }
+                }
+                None => println!("None"),
+            }
+        }
+    }
+}
+
 fn run_for_scenario_file(
     scenario: &Path,
     maps: &Path,
@@ -183,6 +318,9 @@ fn run_for_scenario_file(
     let (scenarios, first_map) = parse_scenario_file(scenario);
     let mut path = std::path::PathBuf::from(maps);
     path.push(first_map);
+
+    refimpl::run_for_scenario_file(&path, scenario);
+
     let raw_map = movingai::parser::parse_map_file(&path).unwrap();
     let size = raw_map.width() * raw_map.height();
     let mut graph = AdjacencyList::with_capacity(size);
@@ -218,8 +356,25 @@ fn run_for_scenario_file(
 
     println!("Scenario count: {}", scenarios.len());
     println!("Graph size: {}", graph.len());
-    for scenario in scenarios.iter() {
-        run_single_scenario(scenario, &mut astar_acc, &coord2node, &node2coord);
+    for (i, scenario) in scenarios.iter().enumerate() {
+        let result = run_single_scenario(scenario, &mut astar_acc, &coord2node, &node2coord);
+        let cost = result.cost() as f64;
+        let expected = scenario.optimal_length;
+        let diff = (expected - cost).abs();
+        if diff > 0.001 {
+            println!(
+                "[{}/{}] shortest path mismatch: Expected {}, got {}, diff {}",
+                i,
+                scenarios.len(),
+                expected,
+                cost,
+                diff
+            );
+            println!(
+                "start: {:?}, end: {:?}",
+                scenario.start_pos, scenario.goal_pos
+            );
+        }
     }
 }
 
