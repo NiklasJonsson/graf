@@ -19,6 +19,8 @@ struct Cli {
     output_graph: Option<PathBuf>,
     #[arg(long)]
     output_map: Option<PathBuf>,
+    #[arg(long)]
+    run_ref_impl: bool,
 }
 
 mod dbg {
@@ -314,12 +316,15 @@ fn run_for_scenario_file(
     maps: &Path,
     output_map: &Option<PathBuf>,
     output_graph: &Option<PathBuf>,
+    run_ref_impl: bool,
 ) {
     let (scenarios, first_map) = parse_scenario_file(scenario);
     let mut path = std::path::PathBuf::from(maps);
     path.push(first_map);
 
-    refimpl::run_for_scenario_file(&path, scenario);
+    if run_ref_impl {
+        refimpl::run_for_scenario_file(&path, scenario);
+    }
 
     let raw_map = movingai::parser::parse_map_file(&path).unwrap();
     let size = raw_map.width() * raw_map.height();
@@ -387,15 +392,27 @@ fn run(cli: Cli) {
             let path = path.expect("Failed to read path");
             if path.file_name().to_str().unwrap().ends_with(".scen") {
                 println!(
-                    "Running for scene {p}. (cargo run --release -- {p} --maps {m})",
+                    "Running for scenarios in {p}. (cargo run --release -- {p} --maps {m})",
                     p = path.path().display(),
                     m = cli.maps.display(),
                 );
-                run_for_scenario_file(&path.path(), &cli.maps, &cli.output_map, &cli.output_graph);
+                run_for_scenario_file(
+                    &path.path(),
+                    &cli.maps,
+                    &cli.output_map,
+                    &cli.output_graph,
+                    cli.run_ref_impl,
+                );
             }
         }
     } else {
-        run_for_scenario_file(path, &cli.maps, &cli.output_map, &cli.output_graph);
+        run_for_scenario_file(
+            path,
+            &cli.maps,
+            &cli.output_map,
+            &cli.output_graph,
+            cli.run_ref_impl,
+        );
     }
     println!("Took {} s to run", start.elapsed().as_secs_f32());
 }
