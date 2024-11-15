@@ -1,3 +1,5 @@
+mod refimpl;
+
 use graf::{AdjacencyList, Edge, Node, NodeMap, Weight};
 
 use clap::Parser;
@@ -103,6 +105,36 @@ mod dbg {
         }
         std::fs::write(path, contents).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
     }
+
+    pub fn dump_failed_scenario(
+        scenario_idx: usize,
+        scenario: &movingai::SceneRecord,
+        result: &ScenarioResult,
+        raw_map: &MovingAiMap,
+        node2coord: &NodeMap<Coords2D>,
+        graph: &AdjacencyList,
+    ) {
+        let dump_dir = format!("dump/{}", scenario_idx);
+        std::fs::create_dir_all(&dump_dir).unwrap();
+        let ref_filepath = format!("{}/refpath.txt", dump_dir);
+        let ref_path = refimpl::shortest_path(&raw_map, scenario.start_pos, scenario.goal_pos);
+        std::fs::write(ref_filepath, format!("{:#?}", ref_path)).unwrap();
+
+        let result_filepath = format!("{}/failpath.txt", dump_dir);
+        let result_path: Vec<Coords2D> = result.path.iter().map(|e| node2coord[e.node]).collect();
+        std::fs::write(result_filepath, format!("{:#?}", result_path)).unwrap();
+
+        let map_path = PathBuf::from(format!("{}/failmap.txt", dump_dir));
+        dbg::dump_map_with_paths(
+            &graph,
+            &node2coord,
+            raw_map.width(),
+            raw_map.height(),
+            Some(&result_path),
+            Some(&ref_path),
+            &map_path,
+        );
+    }
 }
 const DIAG_COST: Weight = std::f32::consts::SQRT_2;
 const STRAIGHT_COST: Weight = 1.0;
@@ -196,133 +228,6 @@ fn parse_scenario_file(file: &Path) -> (Vec<SceneRecord>, String) {
     (scenarios, first_map)
 }
 
-mod refimpl {
-    use movingai::Coords2D;
-    use movingai::Map2D;
-    use movingai::MovingAiMap;
-    use std::cmp::Ordering;
-    use std::collections::{BinaryHeap, HashMap};
-
-    #[derive(Debug)]
-    struct SearchNode {
-        pub f: f64,
-        pub h: f64,
-        pub g: f64,
-        pub current: Coords2D,
-    }
-
-    impl PartialEq for SearchNode {
-        fn eq(&self, other: &SearchNode) -> bool {
-            self.current == other.current
-        }
-    }
-
-    impl Eq for SearchNode {
-        // add code here
-    }
-
-    impl PartialOrd for SearchNode {
-        fn partial_cmp(&self, other: &SearchNode) -> Option<Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
-    impl Ord for SearchNode {
-        fn cmp(&self, other: &SearchNode) -> Ordering {
-            // This is reversed on purpose to make the max-heap into min-heap.
-            if self.f < other.f {
-                Ordering::Greater
-            } else if self.f > other.f {
-                Ordering::Less
-            } else {
-                Ordering::Equal
-            }
-        }
-    }
-
-    fn distance(a: Coords2D, b: Coords2D) -> f64 {
-        let (x, y) = (a.0 as f64, a.1 as f64);
-        let (p, q) = (b.0 as f64, b.1 as f64);
-        ((x - p) * (x - p) + (y - q) * (y - q)).sqrt()
-    }
-
-    fn walk_backwards(
-        start: Coords2D,
-        goal: Coords2D,
-        parents: &HashMap<Coords2D, (Coords2D, f64)>,
-    ) -> Vec<Coords2D> {
-        let mut child = goal;
-        let mut path = Vec::new();
-        loop {
-            let parent = *parents.get(&child).unwrap();
-            path.push(child);
-            child = parent.0;
-            if child == start {
-                path.push(start);
-                path.reverse();
-                return path;
-            }
-        }
-    }
-
-    pub fn shortest_path(map: &MovingAiMap, start: Coords2D, goal: Coords2D) -> Vec<Coords2D> {
-        let mut heap = BinaryHeap::new();
-        let mut visited = Vec::<Coords2D>::new();
-        let mut parents: HashMap<Coords2D, (Coords2D, f64)> = HashMap::new();
-
-        // We're at `start`, with a zero cost
-        heap.push(SearchNode {
-            f: 0.0,
-            g: 0.0,
-            h: distance(start, goal),
-            current: start,
-        });
-
-        while let Some(SearchNode {
-            f: _f,
-            g,
-            h: _h,
-            current,
-        }) = heap.pop()
-        {
-            if current == goal {
-                return walk_backwards(start, goal, &parents);
-            }
-
-            if visited.contains(&current) {
-                continue;
-            }
-
-            visited.push(current);
-
-            for neigh in map.neighbors(current) {
-                let new_h = distance(neigh, goal);
-                let i = distance(neigh, current);
-
-                match parents.entry(neigh) {
-                    std::collections::hash_map::Entry::Occupied(mut entry) => {
-                        if entry.get_mut().1 > (g + i) {
-                            entry.get_mut().1 = g + i;
-                        }
-                    }
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        entry.insert((current, g + i));
-                    }
-                }
-                let next = SearchNode {
-                    f: g + i + new_h,
-                    g: g + i,
-                    h: new_h,
-                    current: neigh,
-                };
-                heap.push(next);
-            }
-        }
-
-        panic!("No goal");
-    }
-}
-
 fn run_for_scenario_file(
     scenario: &Path,
     maps: &Path,
@@ -368,48 +273,31 @@ fn run_for_scenario_file(
 
     println!("Scenario count: {}", scenarios.len());
     println!("Graph size: {}", graph.len());
-    for (i, scenario) in scenarios.iter().enumerate() {
+    let pg = indicatif::ProgressBar::new(scenarios.len() as u64);
+    for (scenario_idx, scenario) in scenarios.iter().enumerate() {
+        pg.inc(1);
         let result = run_single_scenario(scenario, &mut astar_acc, &coord2node, &node2coord);
         let cost = result.cost() as f64;
         let expected = scenario.optimal_length;
         let diff = (expected - cost).abs();
         if diff > 0.001 {
-            println!(
-                "[{}/{}] shortest path mismatch: Expected {}, got {}, diff {}",
-                i,
+            pg.println(format!(
+                "[{}/{}] shortest path mismatch. Start: {:?}, End: {:?}. Expected length {}, got {}, diff {}",
+                scenario_idx,
                 scenarios.len(),
+                scenario.start_pos,
+                scenario.goal_pos,
                 expected,
                 cost,
                 diff
-            );
-            println!(
-                "start: {:?}, end: {:?}",
-                scenario.start_pos, scenario.goal_pos
-            );
-            println!("Dumping ref and fail for {}", i);
-            let refpath = refimpl::shortest_path(&raw_map, scenario.start_pos, scenario.goal_pos);
-
-            std::fs::write(format!("scenario-{}-ref.txt", i), format!("{:#?}", refpath)).unwrap();
-            let computed_path = {
-                let mut coords = Vec::<Coords2D>::with_capacity(result.path.len());
-                for edge in result.path {
-                    coords.push(node2coord[edge.node]);
-                }
-                coords
-            };
-            std::fs::write(
-                format!("scenario-{}-fail.txt", i),
-                format!("{:#?}", computed_path),
-            )
-            .unwrap();
-            dbg::dump_map_with_paths(
-                &graph,
+            ));
+            dbg::dump_failed_scenario(
+                scenario_idx,
+                scenario,
+                &result,
+                &raw_map,
                 &node2coord,
-                raw_map.width(),
-                raw_map.height(),
-                Some(&computed_path),
-                Some(&refpath),
-                &PathBuf::from(format!("failmap-{}.txt", i)),
+                &graph,
             );
         }
     }
