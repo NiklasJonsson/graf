@@ -19,10 +19,9 @@ struct Cli {
     output_graph: Option<PathBuf>,
     #[arg(long)]
     output_map: Option<PathBuf>,
-    #[arg(long)]
-    run_ref_impl: bool,
 }
 
+#[allow(dead_code)]
 mod dbg {
     use super::*;
 
@@ -31,7 +30,19 @@ mod dbg {
         node2coord: &NodeMap<Coords2D>,
         width: usize,
         height: usize,
-        path: &Path,
+        filepath: &Path,
+    ) {
+        dump_map_with_paths(graph, node2coord, width, height, None, None, filepath);
+    }
+
+    pub fn dump_map_with_paths(
+        graph: &AdjacencyList,
+        node2coord: &NodeMap<Coords2D>,
+        width: usize,
+        height: usize,
+        computed_path: Option<&[Coords2D]>,
+        reference_path: Option<&[Coords2D]>,
+        filepath: &Path,
     ) {
         let cap = width * height;
         let mut data = Vec::new();
@@ -44,6 +55,24 @@ mod dbg {
             }
         }
 
+        if let Some(computed_path) = computed_path {
+            for (x, y) in computed_path {
+                data[x + width * y] = '/';
+            }
+        }
+
+        if let Some(reference_path) = reference_path {
+            for (x, y) in reference_path {
+                let idx = x + width * y;
+                let entry = &mut data[idx];
+                if *entry == '/' {
+                    *entry = 'X';
+                } else {
+                    *entry = '\\';
+                }
+            }
+        }
+
         let mut contents = String::with_capacity(cap + height);
         for y in 0..height {
             for x in 0..width {
@@ -53,7 +82,8 @@ mod dbg {
             contents.push('\n');
         }
 
-        std::fs::write(path, contents).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
+        std::fs::write(filepath, contents)
+            .unwrap_or_else(|_| panic!("Bad path: {}", filepath.display()));
     }
 
     pub fn dump_graph(graph: &AdjacencyList, node2coord: &NodeMap<Coords2D>, path: &Path) {
@@ -72,18 +102,6 @@ mod dbg {
             contents.push('\n');
         }
         std::fs::write(path, contents).unwrap_or_else(|_| panic!("Bad path: {}", path.display()));
-    }
-
-    #[allow(dead_code)]
-    pub fn dump_path(gpath: &graf::Path, node2coord: &NodeMap<Coords2D>) {
-        let mut total = 0.0;
-        for Edge { node, weight: cost } in gpath {
-            let c = node2coord[node];
-            total += cost;
-            println!("({:?}, {})", c, cost);
-        }
-
-        println!("total: {}", total);
     }
 }
 const DIAG_COST: Weight = std::f32::consts::SQRT_2;
@@ -179,16 +197,11 @@ fn parse_scenario_file(file: &Path) -> (Vec<SceneRecord>, String) {
 }
 
 mod refimpl {
-    use std::cmp::Ordering;
-    use std::collections::BinaryHeap;
-    use std::path::Path;
-    use std::time::Instant;
-
-    use movingai::parser::parse_map_file;
-    use movingai::parser::parse_scen_file;
     use movingai::Coords2D;
     use movingai::Map2D;
     use movingai::MovingAiMap;
+    use std::cmp::Ordering;
+    use std::collections::{BinaryHeap, HashMap};
 
     #[derive(Debug)]
     struct SearchNode {
@@ -233,9 +246,29 @@ mod refimpl {
         ((x - p) * (x - p) + (y - q) * (y - q)).sqrt()
     }
 
-    fn shortest_path(map: &MovingAiMap, start: Coords2D, goal: Coords2D) -> Option<f64> {
+    fn walk_backwards(
+        start: Coords2D,
+        goal: Coords2D,
+        parents: &HashMap<Coords2D, (Coords2D, f64)>,
+    ) -> Vec<Coords2D> {
+        let mut child = goal;
+        let mut path = Vec::new();
+        loop {
+            let parent = *parents.get(&child).unwrap();
+            path.push(child);
+            child = parent.0;
+            if child == start {
+                path.push(start);
+                path.reverse();
+                return path;
+            }
+        }
+    }
+
+    pub fn shortest_path(map: &MovingAiMap, start: Coords2D, goal: Coords2D) -> Vec<Coords2D> {
         let mut heap = BinaryHeap::new();
         let mut visited = Vec::<Coords2D>::new();
+        let mut parents: HashMap<Coords2D, (Coords2D, f64)> = HashMap::new();
 
         // We're at `start`, with a zero cost
         heap.push(SearchNode {
@@ -253,7 +286,7 @@ mod refimpl {
         }) = heap.pop()
         {
             if current == goal {
-                return Some(g);
+                return walk_backwards(start, goal, &parents);
             }
 
             if visited.contains(&current) {
@@ -265,6 +298,17 @@ mod refimpl {
             for neigh in map.neighbors(current) {
                 let new_h = distance(neigh, goal);
                 let i = distance(neigh, current);
+
+                match parents.entry(neigh) {
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        if entry.get_mut().1 > (g + i) {
+                            entry.get_mut().1 = g + i;
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert((current, g + i));
+                    }
+                }
                 let next = SearchNode {
                     f: g + i + new_h,
                     g: g + i,
@@ -275,39 +319,7 @@ mod refimpl {
             }
         }
 
-        // Goal not reachable
-        None
-    }
-
-    pub fn run_for_scenario_file(map_path: &Path, scenario: &Path) {
-        // TODO: Make this return the path and diff compared to my impl.
-        let map = parse_map_file(map_path).unwrap();
-        let scenes = parse_scen_file(scenario).unwrap();
-        for scene in scenes {
-            let start = scene.start_pos;
-            let goal = scene.goal_pos;
-            let optimal = scene.optimal_length;
-            let t = Instant::now();
-            match shortest_path(&map, start, goal) {
-                Some(g) => {
-                    let duration = t.elapsed();
-                    let millis = duration.as_millis();
-                    let delta = (optimal - g).abs();
-                    if delta > 0.00001 {
-                        println!(
-                            "{:?} -> {:?} = {:.5} \t\tin {:.5} ms (Δ{:.5})",
-                            start, goal, g, millis, delta
-                        );
-                    } else {
-                        println!(
-                            "{:?} -> {:?} = {:.5} \t\tin {:.5} ms",
-                            start, goal, g, millis
-                        );
-                    }
-                }
-                None => println!("None"),
-            }
-        }
+        panic!("No goal");
     }
 }
 
@@ -316,15 +328,10 @@ fn run_for_scenario_file(
     maps: &Path,
     output_map: &Option<PathBuf>,
     output_graph: &Option<PathBuf>,
-    run_ref_impl: bool,
 ) {
     let (scenarios, first_map) = parse_scenario_file(scenario);
     let mut path = std::path::PathBuf::from(maps);
     path.push(first_map);
-
-    if run_ref_impl {
-        refimpl::run_for_scenario_file(&path, scenario);
-    }
 
     let raw_map = movingai::parser::parse_map_file(&path).unwrap();
     let size = raw_map.width() * raw_map.height();
@@ -379,6 +386,31 @@ fn run_for_scenario_file(
                 "start: {:?}, end: {:?}",
                 scenario.start_pos, scenario.goal_pos
             );
+            println!("Dumping ref and fail for {}", i);
+            let refpath = refimpl::shortest_path(&raw_map, scenario.start_pos, scenario.goal_pos);
+
+            std::fs::write(format!("scenario-{}-ref.txt", i), format!("{:#?}", refpath)).unwrap();
+            let computed_path = {
+                let mut coords = Vec::<Coords2D>::with_capacity(result.path.len());
+                for edge in result.path {
+                    coords.push(node2coord[edge.node]);
+                }
+                coords
+            };
+            std::fs::write(
+                format!("scenario-{}-fail.txt", i),
+                format!("{:#?}", computed_path),
+            )
+            .unwrap();
+            dbg::dump_map_with_paths(
+                &graph,
+                &node2coord,
+                raw_map.width(),
+                raw_map.height(),
+                Some(&computed_path),
+                Some(&refpath),
+                &PathBuf::from(format!("failmap-{}.txt", i)),
+            );
         }
     }
 }
@@ -396,23 +428,11 @@ fn run(cli: Cli) {
                     p = path.path().display(),
                     m = cli.maps.display(),
                 );
-                run_for_scenario_file(
-                    &path.path(),
-                    &cli.maps,
-                    &cli.output_map,
-                    &cli.output_graph,
-                    cli.run_ref_impl,
-                );
+                run_for_scenario_file(&path.path(), &cli.maps, &cli.output_map, &cli.output_graph);
             }
         }
     } else {
-        run_for_scenario_file(
-            path,
-            &cli.maps,
-            &cli.output_map,
-            &cli.output_graph,
-            cli.run_ref_impl,
-        );
+        run_for_scenario_file(path, &cli.maps, &cli.output_map, &cli.output_graph);
     }
     println!("Took {} s to run", start.elapsed().as_secs_f32());
 }

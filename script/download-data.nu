@@ -8,6 +8,8 @@ def main [] {
         "dao-map",
     ]
 
+    mkdir $data_root
+
     $files | par-each { |file|
         let url = $"https://movingai.com/benchmarks/dao/($file).zip"
         let dst = $"($data_root)/($file).zip"
